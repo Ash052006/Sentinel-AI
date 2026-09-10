@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: sentinelai-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: sentinelai
+      POSTGRES_USER: sentinelai_user
+      POSTGRES_PASSWORD: sentinelai_dev_password
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: sentinelai-kafka
+    restart: unless-stopped
+
+    environment:
+      # KRaft mode — single combined broker+controller, no Zookeeper
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      # Listeners
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
+
+      # Reliability / topic settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: "1"
+
+    ports:
+      - "9092:9092"
+
+volumes:
+  postgres_data:
