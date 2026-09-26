@@ -1,0 +1,28 @@
+title: Suspicious Command Execution
+id: 66666666-6666-4666-8666-666666666666
+status: stable
+description: Detects execution of dual-use tools commonly used for payload
+  transfer and remote command execution in the SentinelAI process category.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: high
+logsource:
+  category: process
+  product: windows
+detection:
+  selection:
+    event_category: process
+    CommandLine|contains:
+      - 'certutil -urlcache'
+      - 'certutil -split'
+      - 'bitsadmin /transfer'
+      - 'wmic process call create'
+      - 'RegSvcs'
+      - 'InstallUtil'
+  condition: selection
+fields:
+  - event_category
+  - CommandLine
+falsepositives:
+  - Patch-management tooling that legitimately stages files with certutil
+    or bitsadmin

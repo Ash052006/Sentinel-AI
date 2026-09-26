@@ -1,0 +1,28 @@
+title: Host and Network Reconnaissance Commands
+id: 21000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects a cluster of one-liner host and network reconnaissance commands commonly run during post-exploitation enumeration.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_recon:
+    CommandLine|contains:
+      - ipconfig /all
+      - net user
+      - net localgroup
+      - whoami /all
+      - systeminfo
+      - arp -a
+  condition: selection_category and selection_recon
+fields:
+  - event_category
+  - CommandLine
+falsepositives:
+  - IT troubleshooting sessions that routinely run basic network and host enumeration commands

@@ -1,0 +1,28 @@
+title: Suspicious Network Connection
+id: 88888888-8888-4888-8888-888888888888
+status: stable
+description: Detects network-category events referencing SMB peer-to-peer
+  traffic or reverse-shell style connection actions.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: high
+logsource:
+  category: network
+  product: windows
+detection:
+  selection_category:
+    event_category: network
+  selection_smb:
+    DestinationProtocol: smb
+  selection_reverse_shell:
+    action|contains:
+      - reverse
+      - bind
+      - exfil
+  condition: selection_category and (selection_smb or selection_reverse_shell)
+fields:
+  - event_category
+  - DestinationProtocol
+  - action
+falsepositives:
+  - Internal peer-to-peer file sharing over SMB on sanctioned segments

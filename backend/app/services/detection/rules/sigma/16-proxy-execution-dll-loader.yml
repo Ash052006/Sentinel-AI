@@ -1,0 +1,32 @@
+title: Proxy Execution Via DLL Loading Utilities
+id: 16000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects proxy execution through rundll32, regsvr32, or msiexec with command-line markers associated with scriptlet and web-delivered payloads.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: high
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_image:
+    Image|endswith:
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\msiexec.exe'
+  selection_markers:
+    CommandLine|contains:
+      - -i http
+      - -i javascript
+      - scrobj.dll
+      - frombase64
+  condition: selection_category and selection_image and selection_markers
+fields:
+  - event_category
+  - Image
+  - CommandLine
+falsepositives:
+  - Software installers that legitimately invoke msiexec with remote or scriptlet package sources

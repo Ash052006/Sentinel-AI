@@ -1,0 +1,9 @@
+warning: in the working copy of 'backend/app/database/postgres/migrations/env.py', LF will be replaced by CRLF the next time Git touches it
+ backend/app/agents/__init__.py                  |   2 [32m+[m
+ backend/app/agents/detection.py                 | 109 [32m+++++++++++++++++++++++[m[31m-[m
+ backend/app/api/router.py                       |  14 [32m++[m[31m-[m
+ backend/app/database/postgres/migrations/env.py |   2 [32m+[m
+ backend/app/models/__init__.py                  |   4 [32m+[m
+ backend/app/schemas/__init__.py                 |  43 [32m+++++++++[m[31m-[m
+ backend/app/schemas/security_event.py           |  16 [32m+++[m[31m-[m
+ 7 files changed, 180 insertions(+), 10 deletions(-)

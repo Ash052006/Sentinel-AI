@@ -1,0 +1,1 @@
+psexec -s \\10.0.0.5; wmic /node:10.0.0.5; net use /user:DOMAIN\joe; schtasks /run /s 10.0.0.5; c$\admin$

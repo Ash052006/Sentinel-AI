@@ -1,0 +1,22 @@
+{
+  "event_id": "859810d0-0244-4dd7-bde1-cec9d77d8200",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "cmd.exe",
+    "pid": null,
+    "command_line": "cmd.exe /c whoami",
+    "executable": "C:\\Windows\\System32\\cmd.exe",
+    "parent_process": "C:\\xampp\\apache\\bin\\httpd.exe"
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

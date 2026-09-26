@@ -1,0 +1,1 @@
+powershell -EncodedCommand AAAA -NoProfile DownloadString

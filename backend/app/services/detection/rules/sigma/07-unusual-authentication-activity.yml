@@ -1,0 +1,24 @@
+title: Unusual Authentication Activity
+id: 77777777-7777-4777-8777-777777777777
+status: stable
+description: Detects denied authentication events for service-style accounts,
+  which may indicate service account compromise or misconfiguration.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: medium
+logsource:
+  category: authentication
+  product: windows
+detection:
+  selection_denied:
+    event_category: authentication
+    outcome: denied
+  selection_service_account:
+    User|endswith: $
+  condition: selection_denied and selection_service_account
+fields:
+  - event_category
+  - outcome
+  - User
+falsepositives:
+  - Service accounts that routinely trigger failed network logons

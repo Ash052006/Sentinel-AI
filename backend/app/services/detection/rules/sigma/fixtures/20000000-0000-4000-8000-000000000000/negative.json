@@ -1,0 +1,20 @@
+{
+  "event_id": "2ba537dc-14ac-418c-bc3d-33309947b530",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": "routine_health_check",
+  "outcome": "unknown",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": {
+    "user_id": null,
+    "username": "svc-healthcheck",
+    "domain": null
+  },
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

@@ -1,0 +1,27 @@
+title: Privilege Escalation Indicator
+id: 44444444-4444-4444-8444-444444444444
+status: experimental
+description: Detects system-category events that reference privilege escalation
+  activity or the local SYSTEM account.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: critical
+logsource:
+  category: system
+  product: windows
+detection:
+  selection_privilege_action:
+    event_category: system
+    action|contains:
+      - privilege
+      - escalation
+      - elevation
+  selection_system_account:
+    UserSid: S-1-5-18
+  condition: selection_privilege_action or selection_system_account
+fields:
+  - event_category
+  - action
+  - UserSid
+falsepositives:
+  - Scheduled tasks and services that legitimately run as SYSTEM

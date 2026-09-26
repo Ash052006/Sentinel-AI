@@ -1,0 +1,20 @@
+{
+  "event_id": "f249f491-f09a-48e3-aee4-8818d07fe9dc",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "authentication",
+  "action": "login",
+  "outcome": "denied",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": {
+    "user_id": null,
+    "username": "svc-backup$",
+    "domain": null
+  },
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

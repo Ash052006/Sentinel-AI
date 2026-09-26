@@ -1,0 +1,18 @@
+{
+  "event_id": "ac4bc89c-791a-487c-8d7b-50115329e2ca",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": null,
+  "outcome": "denied",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {
+    "rule_name": "block-outbound-traffic"
+  },
+  "provenance": "observed"
+}

@@ -9,10 +9,44 @@ from app.agents.enrichment import EnrichmentAgent
 from app.agents.normalization import NormalizationAgent
 from app.agents.threat_intelligence import ThreatIntelligenceAgent
 from app.agents.detection import DetectionAgent
+from app.agents.correlation import CorrelationAgent
+from app.agents.risk_scoring import RiskScoringAgent
+from app.agents.investigation import (
+    InvestigationAgent,
+    InvestigationAgentError,
+    InvestigationConfigurationError,
+    InvestigationContextError,
+    InvestigationEvidenceError,
+    InvestigationInternalError,
+    InvestigationLLMClient,
+    InvestigationModelOutputError,
+    InvestigationModelValidationError,
+    InvestigationProviderError,
+    InvestigationProviderTimeoutError,
+    InvestigationProviderUnavailableError,
+    InvestigationPromptBuilder,
+    InvestigationSecretSafetyError,
+)
 
 __all__ = [
     "EnrichmentAgent",
     "NormalizationAgent",
     "ThreatIntelligenceAgent",
     "DetectionAgent",
+    "CorrelationAgent",
+    "RiskScoringAgent",
+    "InvestigationAgent",
+    "InvestigationAgentError",
+    "InvestigationLLMClient",
+    "InvestigationPromptBuilder",
+    "InvestigationConfigurationError",
+    "InvestigationContextError",
+    "InvestigationEvidenceError",
+    "InvestigationInternalError",
+    "InvestigationModelOutputError",
+    "InvestigationModelValidationError",
+    "InvestigationProviderError",
+    "InvestigationProviderTimeoutError",
+    "InvestigationProviderUnavailableError",
+    "InvestigationSecretSafetyError",
 ]

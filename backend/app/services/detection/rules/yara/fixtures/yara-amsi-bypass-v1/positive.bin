@@ -1,0 +1,1 @@
+AMSIInitFailed scan disabled; patch amsi_patch hooks ETWProvider; reference AmsiScanBuffer from amsi.dll

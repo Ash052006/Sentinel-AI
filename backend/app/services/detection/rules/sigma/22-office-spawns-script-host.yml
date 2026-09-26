@@ -1,0 +1,36 @@
+title: Office Document Spawns Scripting Host
+id: 22000000-0000-4000-8000-000000000000
+status: stable
+description: Detects macro-bearing Office or PDF applications spawning a scripting or command-line host, the hallmark of macro-based weaponized documents.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: critical
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_parent:
+    ParentImage|endswith:
+      - '\winword.exe'
+      - '\excel.exe'
+      - '\outlook.exe'
+      - '\powerpnt.exe'
+      - '\acrord32.exe'
+  selection_child:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+  condition: selection_category and selection_parent and selection_child
+fields:
+  - event_category
+  - ParentImage
+  - Image
+falsepositives:
+  - Document workflows that embed live scripts (e.g. DDE in legacy finance templates) from trusted sources

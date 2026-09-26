@@ -1,0 +1,31 @@
+title: DNS Query For Suspicious Top-Level Domain
+id: 26000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects DNS queries for destinations under top-level domains that are disproportionately used for disposable and phishing infrastructure.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: network
+  product: windows
+detection:
+  selection_category:
+    event_category: network
+  selection_dns:
+    action|contains: dns
+  selection_tld:
+    DestinationHostname|endswith:
+      - .top
+      - .xyz
+      - .zip
+      - .gq
+      - .tk
+      - .ml
+  condition: selection_category and selection_dns and selection_tld
+fields:
+  - event_category
+  - action
+  - DestinationHostname
+falsepositives:
+  - Internal tooling that legitimately resolves short-lived registrations on budget domains for marketing or testing

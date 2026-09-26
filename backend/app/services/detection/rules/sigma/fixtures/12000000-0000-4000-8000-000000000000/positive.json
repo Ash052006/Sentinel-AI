@@ -1,0 +1,20 @@
+{
+  "event_id": "97f4d4c9-e29e-4b46-a33d-c973549e945d",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "authentication",
+  "action": "guest logon",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": {
+    "user_id": null,
+    "username": "guest",
+    "domain": null
+  },
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

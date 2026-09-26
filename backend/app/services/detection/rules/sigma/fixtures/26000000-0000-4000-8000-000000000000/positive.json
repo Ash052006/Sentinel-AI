@@ -1,0 +1,21 @@
+{
+  "event_id": "2a1299af-e462-43f1-b401-f98228468e9c",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": "dns query",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": {
+    "ip": null,
+    "hostname": "redirector.example.xyz",
+    "port": null,
+    "protocol": null
+  },
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

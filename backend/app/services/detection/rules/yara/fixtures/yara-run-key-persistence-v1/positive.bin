@@ -1,0 +1,1 @@
+add HKLM\Software\Microsoft\Windows\CurrentVersion\Run plus HKCU\Software\Microsoft\Windows\CurrentVersion\Run entry; copy to Programs\Startup\ folder; schtasks /create /tn stay

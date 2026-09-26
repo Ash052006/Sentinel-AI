@@ -1,0 +1,1 @@
+if (@$_GET['cmd']) { echo chr(0x41); echo gzuncompress(''); base64_decode(str_rot13($x)); create_function($y); }

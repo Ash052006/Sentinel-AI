@@ -22,7 +22,7 @@ class TestAuditIntegration:
         before = _count_for_action(db_session, "auth.login.success")
         response = client.post(
             "/api/auth/login",
-            params={"email": admin_user.email, "password": "TestPassword123!"},
+            json={"email": admin_user.email, "password": "TestPassword123!"},
         )
         assert response.status_code == 200
         assert _count_for_action(db_session, "auth.login.success") == before + 1
@@ -33,7 +33,7 @@ class TestAuditIntegration:
         before = _count_for_action(db_session, "auth.login.failed")
         response = client.post(
             "/api/auth/login",
-            params={"email": admin_user.email, "password": "WrongPassword!"},
+            json={"email": admin_user.email, "password": "WrongPassword!"},
         )
         assert response.status_code == 401
         assert _count_for_action(db_session, "auth.login.failed") == before + 1
@@ -87,7 +87,7 @@ class TestAuditIntegration:
         # Ensure at least one sensitive action is recorded.
         client.post(
             "/api/auth/login",
-            params={"email": admin_user.email, "password": "TestPassword123!"},
+            json={"email": admin_user.email, "password": "TestPassword123!"},
         )
 
         response = client.get(

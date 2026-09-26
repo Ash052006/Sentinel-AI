@@ -1,0 +1,22 @@
+{
+  "event_id": "49eac039-1e01-4bb3-97cd-74925a9242c9",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "schtasks.exe",
+    "pid": null,
+    "command_line": "schtasks /create /sc onlogon /tn updater /tr calc.exe",
+    "executable": null,
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

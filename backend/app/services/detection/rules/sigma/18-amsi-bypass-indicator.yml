@@ -1,0 +1,25 @@
+title: AMSI Bypass Indicator
+id: 18000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects command-line or script references to Antimalware Scan Interface (AMSI) bypass primitives, frequently used to disable script scanning before malicious execution.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: high
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_amsi:
+    CommandLine|contains:
+      - amsi
+      - AmsiInitFailed
+      - -amsi
+  condition: selection_category and selection_amsi
+fields:
+  - event_category
+  - CommandLine
+falsepositives:
+  - Malware-research tooling, penetration-testing frameworks, and security validation scripts that reference AMSI testing APIs

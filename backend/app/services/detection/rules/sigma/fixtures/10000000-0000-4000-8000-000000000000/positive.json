@@ -1,0 +1,22 @@
+{
+  "event_id": "c4acc110-0991-4be2-bbd7-8132fe8ddd4a",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "authentication",
+  "action": "network logon",
+  "outcome": "failure",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": {
+    "user_id": null,
+    "username": "appuser",
+    "domain": null
+  },
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {
+    "logon_type": 3
+  },
+  "provenance": "observed"
+}

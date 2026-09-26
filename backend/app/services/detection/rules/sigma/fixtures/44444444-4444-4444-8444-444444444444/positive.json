@@ -1,0 +1,16 @@
+{
+  "event_id": "efb36c21-34c0-4f16-955e-d90b4d9c3512",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "system",
+  "action": "privilege escalation detected",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

@@ -1,0 +1,20 @@
+{
+  "event_id": "df0bc6a4-586c-470d-9227-a901cc0ca694",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "authentication",
+  "action": "interactive logon",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": {
+    "user_id": null,
+    "username": "sqlsvc$",
+    "domain": null
+  },
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

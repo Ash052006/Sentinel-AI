@@ -1,0 +1,16 @@
+{
+  "event_id": "a9e844f1-7790-4338-a54f-4d528df762ea",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": "rdp session established",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

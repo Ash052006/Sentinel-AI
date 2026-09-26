@@ -1,0 +1,1 @@
+pool stratum+tcp://pool.mine.example:3333; xmrig config; cpuminer launch; ethash algo; nicehash

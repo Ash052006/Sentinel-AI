@@ -1,0 +1,22 @@
+{
+  "event_id": "492b23f8-e153-4dde-bbb7-5ce1acfabd4e",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "powershell.exe",
+    "pid": null,
+    "command_line": "powershell -noprofile -Command AmsiInitFailed",
+    "executable": null,
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

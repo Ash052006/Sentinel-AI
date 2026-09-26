@@ -1,0 +1,27 @@
+title: Suspicious Process Creation
+id: 33333333-3333-4333-8333-333333333333
+status: stable
+description: Detects creation of commonly abused scripting and download utilities
+  in the SentinelAI process event category.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: high
+logsource:
+  category: process
+  product: windows
+detection:
+  selection:
+    event_category: process
+    Image|endswith:
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+  condition: selection
+fields:
+  - event_category
+  - Image
+falsepositives:
+  - Legitimate administrative use of cmd.exe and scripting hosts

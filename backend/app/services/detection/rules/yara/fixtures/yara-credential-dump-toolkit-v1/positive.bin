@@ -1,0 +1,1 @@
+privilege::debug; lsass::dump; kerberos::golden; dcsync; sekurlsa::pth

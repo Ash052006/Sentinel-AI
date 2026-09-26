@@ -1,0 +1,28 @@
+title: Suspicious Remote Access
+id: 55555555-5555-4555-8555-555555555555
+status: stable
+description: Detects network-category events that reference common remote access
+  protocols and administrative tools.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: medium
+logsource:
+  category: network
+  product: windows
+detection:
+  selection_category:
+    event_category: network
+  selection_remote_proto:
+    action|contains:
+      - rdp
+      - ssh
+      - teamviewer
+      - anyservices
+  selection_mstsc:
+    action|startswith: mstsc
+  condition: selection_category and (selection_remote_proto or selection_mstsc)
+fields:
+  - event_category
+  - action
+falsepositives:
+  - Routine remote administration from approved jump hosts

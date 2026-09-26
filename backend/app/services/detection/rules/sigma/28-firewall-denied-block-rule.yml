@@ -1,0 +1,28 @@
+title: Firewall Denied Traffic On Block Rule
+id: 28000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects denied network events attributed to firewall block, drop, or deny rules, which can indicate outbound exfiltration attempts or inbound scanning hitting policy boundaries.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: network
+  product: firewall
+detection:
+  selection_category:
+    event_category: network
+  selection_denied:
+    outcome: denied
+  selection_block_rule:
+    rule_name|contains:
+      - block
+      - drop
+      - deny
+  condition: selection_category and selection_denied and selection_block_rule
+fields:
+  - event_category
+  - outcome
+  - rule_name
+falsepositives:
+  - Expected policy denials from scans, authorized red-team exercises, and misconfigured third-party services

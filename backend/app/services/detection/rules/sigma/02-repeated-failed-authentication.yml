@@ -1,0 +1,24 @@
+title: Repeated Failed Authentication
+id: 22222222-2222-4222-8222-222222222222
+status: stable
+description: Detects failed login attempts on the SentinelAI authentication event
+  category, which may indicate credential stuffing or brute-force activity.
+author: SentinelAI Detection Team
+date: 2024-06-15
+level: medium
+logsource:
+  category: authentication
+  product: windows
+detection:
+  selection_login:
+    event_category: authentication
+    action|contains: login
+  selection_failed:
+    outcome: failure
+  condition: selection_login and selection_failed
+fields:
+  - event_category
+  - action
+  - outcome
+falsepositives:
+  - Users who frequently mistype their password

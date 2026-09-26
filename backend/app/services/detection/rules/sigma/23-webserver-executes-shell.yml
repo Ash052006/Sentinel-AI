@@ -1,0 +1,34 @@
+title: Web Server Process Executes Shell Commands
+id: 23000000-0000-4000-8000-000000000000
+status: stable
+description: Detects a web-server process spawning a process whose command line shows shell or PowerShell execution, a strong indicator of web-shell or command-injection exploitation.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: critical
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_web_parent:
+    ParentImage|endswith:
+      - '\httpd.exe'
+      - '\nginx.exe'
+      - '\apache2'
+      - '\w3wp.exe'
+      - '\php.exe'
+  selection_shell:
+    CommandLine|contains:
+      - powershell
+      - -enc
+      - cmd.exe
+      - /bin/sh
+  condition: selection_category and selection_web_parent and selection_shell
+fields:
+  - event_category
+  - ParentImage
+  - CommandLine
+falsepositives:
+  - CMS update and server-administration tooling that spawns PHP/CLI helpers from the web runtime

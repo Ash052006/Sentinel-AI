@@ -1,0 +1,54 @@
+SYNTAX-OK
+total lines: 232
+  85 | 
+  86 | def _groups_to_results(
+  87 |     groups: list[CorrelationGroup],
+  88 |     now: datetime,
+  89 | ) -> list[CorrelationResult]:
+  90 |     """Convert strategy output into the Step 10A contract.
+  91 | 
+  92 |     The complete result list is built before anything is returned; a
+  93 |     malformed group aborts the whole conversion so no partially
+  94 |     constructed ``CorrelationResult`` can escape.
+  95 | 
+  96 |     Raises:
+  97 |         CorrelationStrategyError: when a group is not a
+  98 |             ``CorrelationGroup``, is empty, or carries a non-UUID event.
+  99 |     """
+ 100 |     results: list[CorrelationResult] = []
+ 101 |     for group in groups:
+ 102 |         if not isinstance(group, CorrelationGroup):
+ 103 |             raise CorrelationStrategyError(
+ 104 |                 "the correlation strategy returned a"
+ 105 |                 " non-CorrelationGroup item"
+ 106 |             )
+ 107 |         if not group.members:
+ 108 |             raise CorrelationStrategyError(
+ 109 |                 "the correlation strategy returned an empty"
+ 110 |                 " correlation group"
+ 111 |             )
+ 112 |         if not isinstance(group.event_id, uuid.UUID):
+ 113 |             raise CorrelationStrategyError(
+ 114 |                 "the correlation strategy returned a group"
+ 115 |                 " without a valid event id"
+ 116 |             )
+ 117 |         results.append(
+ 118 |             CorrelationResult(
+ 119 |                 members=to_correlation_members(group.members),
+ 120 |                 evidence=_correlation_evidence(group),
+ 121 |                 metadata={},
+ 122 |                 timestamp=now,
+ 123 |             )
+ 124 |         )
+ 125 |     return results
+ 126 | 
+ 127 | 
+ 128 | class CorrelationAgent:
+ 129 |     """Consumes a detection batch and produces correlation results.
+ 130 | 
+ 131 |     The agent is an orchestrator: it validates the batch, delegates all
+ 132 |     grouping to the configured strategy, converts the strategy's output
+ 133 |     into the Step 10A contract, and returns a complete list of
+ 134 |     ``CorrelationResult`` objects in deterministic order.
+ 135 | 
+ 136 |     Args:

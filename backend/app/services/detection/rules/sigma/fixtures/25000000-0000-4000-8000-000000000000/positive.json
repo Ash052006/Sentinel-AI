@@ -1,0 +1,21 @@
+{
+  "event_id": "df9caf76-e96c-4ca5-b7c1-28984e3edf7e",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": "connection established",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": {
+    "ip": null,
+    "hostname": null,
+    "port": 6667,
+    "protocol": "tcp"
+  },
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

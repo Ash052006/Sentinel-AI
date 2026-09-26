@@ -1,0 +1,21 @@
+{
+  "event_id": "0a72b911-9acb-4ba3-a9e9-ef6d32ee1858",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": "smb connection",
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": {
+    "ip": null,
+    "hostname": null,
+    "port": null,
+    "protocol": "smb"
+  },
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

@@ -1,0 +1,1 @@
+Private Sub Document_Open(); Auto_Open; DDEAUTO; AutoExec; AutoOpen()

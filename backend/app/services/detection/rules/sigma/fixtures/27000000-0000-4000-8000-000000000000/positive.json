@@ -1,0 +1,21 @@
+{
+  "event_id": "010a0f1a-322c-472e-8b6c-4a9b7a62ca4d",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "network",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": {
+    "ip": null,
+    "hostname": null,
+    "port": 31337,
+    "protocol": "tcp"
+  },
+  "process": null,
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

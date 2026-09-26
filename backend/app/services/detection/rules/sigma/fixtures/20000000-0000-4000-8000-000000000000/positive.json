@@ -1,0 +1,22 @@
+{
+  "event_id": "f603a528-0906-4510-bca1-4ec7defba8ce",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "nc.exe",
+    "pid": null,
+    "command_line": null,
+    "executable": "C:\\Tools\\nc.exe",
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

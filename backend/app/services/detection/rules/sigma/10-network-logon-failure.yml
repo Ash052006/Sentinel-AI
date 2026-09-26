@@ -1,0 +1,28 @@
+title: Network Logon Failure
+id: 10000000-0000-4000-8000-000000000000
+status: stable
+description: Detects failed network (type 3) logon events, which frequently precede brute-force and credential-stuffing activity against domain or remote services.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: authentication
+  product: windows
+detection:
+  selection_category:
+    event_category: authentication
+  selection_logon:
+    action|contains: logon
+  selection_network:
+    logon_type: '3'
+  selection_failure:
+    outcome: failure
+  condition: selection_category and selection_logon and selection_network and selection_failure
+fields:
+  - event_category
+  - action
+  - logon_type
+  - outcome
+falsepositives:
+  - Stale cached credentials and misconfigured service accounts that fail network logons periodically

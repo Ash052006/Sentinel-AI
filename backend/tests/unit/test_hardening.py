@@ -109,12 +109,29 @@ class TestPasswordSecurity:
     ):
         response = client.post(
             "/api/auth/login",
-            params={"email": admin_user.email, "password": "TestPassword123!"},
+            json={"email": admin_user.email, "password": "TestPassword123!"},
         )
         assert response.status_code == 200
         body = response.json()
         assert "password" not in body
         assert "hash" not in body
+
+    def test_login_credentials_are_not_accepted_as_query_parameters(
+        self, client: TestClient, admin_user
+    ):
+        """H2.F-03 regression.
+
+        The login contract carries credentials in the JSON body only.
+        Credentials supplied via the URL query string must NOT be honored:
+        query strings leak into proxy logs, referring pages and browser
+        history, so they are never a valid transport for secrets.
+        """
+        response = client.post(
+            "/api/auth/login",
+            params={"email": admin_user.email, "password": "TestPassword123!"},
+        )
+        assert response.status_code == 422
+        assert "password" not in str(response.text).lower()
 
 
 

@@ -1,0 +1,22 @@
+{
+  "event_id": "8120bdab-40c4-4052-bef4-98c257f67642",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "cmd.exe",
+    "pid": null,
+    "command_line": null,
+    "executable": "C:\\Windows\\System32\\cmd.exe",
+    "parent_process": "C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\WINWORD.EXE"
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

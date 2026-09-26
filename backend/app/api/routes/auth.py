@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.auth import UserRegister, TokenResponse
+from app.schemas.auth import LoginRequest, UserRegister, TokenResponse
 from app.models.role import Role
 from app.services.audit_service import log_action
 
@@ -60,11 +60,12 @@ def register(
 
 @router.post("/login", response_model=TokenResponse)
 def login(
-    email: str,
-    password: str,
+    payload: LoginRequest,
     request: Request,
     db: Session = Depends(get_db),
 ):
+    email = payload.email
+    password = payload.password
     user = db.execute(
         select(User).where(User.email == email)
     ).scalar_one_or_none()

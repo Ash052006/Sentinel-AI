@@ -1,0 +1,22 @@
+{
+  "event_id": "aa3c6474-c59e-48e8-ada5-66fe19d8ac63",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "process",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": null,
+  "process": {
+    "name": "powershell.exe",
+    "pid": null,
+    "command_line": null,
+    "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "parent_process": "C:\\Windows\\System32\\wscript.exe"
+  },
+  "file": null,
+  "normalized_data": {},
+  "provenance": "observed"
+}

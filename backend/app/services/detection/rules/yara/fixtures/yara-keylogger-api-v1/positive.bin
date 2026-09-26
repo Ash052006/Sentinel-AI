@@ -1,0 +1,1 @@
+GetAsyncKeyState loop; SetWindowsHookEx WH_KEYBOARD_LL LowLevelKeyboardProc; keybd_event replays

@@ -1,0 +1,23 @@
+{
+  "event_id": "c8849722-4d73-4d85-b5b1-7b5fb9b30358",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "event_category": "authentication",
+  "action": null,
+  "outcome": "success",
+  "source": "tests",
+  "source_type": "operating_system",
+  "actor": null,
+  "source_endpoint": null,
+  "destination_endpoint": {
+    "ip": null,
+    "hostname": null,
+    "port": 3389,
+    "protocol": null
+  },
+  "process": null,
+  "file": null,
+  "normalized_data": {
+    "logon_type": 10
+  },
+  "provenance": "observed"
+}

@@ -1,0 +1,26 @@
+title: Scheduled Task Creation or Modification
+id: 17000000-0000-4000-8000-000000000000
+status: stable
+description: Detects schtasks invocations that create or run scheduled tasks, a common persistence primitive for malware and lateral movement tooling.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: process
+  product: windows
+detection:
+  selection_category:
+    event_category: process
+  selection_task_action:
+    CommandLine|contains:
+      - schtasks /create
+      - schtasks /run
+      - /sc onlogon
+      - /sc onstart
+  condition: selection_category and selection_task_action
+fields:
+  - event_category
+  - CommandLine
+falsepositives:
+  - Software deployment and patch-management agents that create scheduled tasks routinely

@@ -1,0 +1,29 @@
+title: Connection To Uncommon Dynamic Port
+id: 27000000-0000-4000-8000-000000000000
+status: experimental
+description: Detects connection attempts to fixed high-number ports that are overwhelmingly associated with backdoors, reverse shells, and self-hosted tunnelling agents.
+author: SentinelAI Detection Team
+date: 2026-09-23
+version: 1
+level: medium
+logsource:
+  category: network
+  product: firewall
+detection:
+  selection_category:
+    event_category: network
+  selection_dynamic_port:
+    DestinationPort:
+      - '1337'
+      - '31337'
+      - '4444'
+      - '5555'
+      - '9001'
+      - '12345'
+      - '54321'
+  condition: selection_category and selection_dynamic_port
+fields:
+  - event_category
+  - DestinationPort
+falsepositives:
+  - Self-hosted gaming, streaming, and internal microservices that bind custom high ports on known hosts
