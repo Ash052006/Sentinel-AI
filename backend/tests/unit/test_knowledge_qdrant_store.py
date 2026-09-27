@@ -33,7 +33,7 @@ class FakeQdrantClient:
         self.created: bool = False
         self.create_kwargs: dict[str, Any] | None = None
         self.upsert_kwargs: dict[str, Any] | None = None
-        self.search_kwargs: dict[str, Any] | None = None
+        self.query_points_kwargs: dict[str, Any] | None = None
 
     def get_collection(self, collection_name: str) -> Any:
         if not self.exists:
@@ -47,9 +47,9 @@ class FakeQdrantClient:
     def upsert(self, **kwargs: Any) -> None:
         self.upsert_kwargs = kwargs
 
-    def search(self, **kwargs: Any) -> list[Any]:
-        self.search_kwargs = kwargs
-        return self.hits
+    def query_points(self, **kwargs: Any) -> Any:
+        self.query_points_kwargs = kwargs
+        return SimpleNamespace(points=self.hits)
 
 
 def _store(fake: FakeQdrantClient, **kw) -> QdrantKnowledgeVectorStore:
@@ -182,7 +182,7 @@ def test_search_rebuilds_items():
     assert items[0].knowledge_id == CHUNK_IDS[0]
     assert items[0].relevance_score == 0.9
     assert items[1].relevance_score == 0.4
-    assert fake.search_kwargs["limit"] == 2
+    assert fake.query_points_kwargs["limit"] == 2
 
 
 def test_search_passes_knowledge_type_filter():
@@ -193,7 +193,7 @@ def test_search_passes_knowledge_type_filter():
         limit=3,
         knowledge_types=[KnowledgeType.MITRE_ATTACK, KnowledgeType.CVE],
     )
-    filters = fake.search_kwargs["query_filter"]
+    filters = fake.query_points_kwargs["query_filter"]
     assert filters.should[0].key == "knowledge_type"
     assert filters.should[0].match.value == KnowledgeType.MITRE_ATTACK.value
 
@@ -227,7 +227,7 @@ def test_search_fails_closed_on_malformed_payload():
 
 def test_search_fails_closed_when_backend_raises():
     class ExplodingClient(FakeQdrantClient):
-        def search(self, **kwargs):
+        def query_points(self, **kwargs):
             raise RuntimeError("backend exploded")
 
     store = _store(ExplodingClient())

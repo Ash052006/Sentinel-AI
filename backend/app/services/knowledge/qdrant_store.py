@@ -198,13 +198,14 @@ class QdrantKnowledgeVectorStore(KnowledgeVectorStore):
             )
 
         try:
-            hits = client.search(
+            response = client.query_points(
                 collection_name=self._collection,
-                query_vector=list(vector),
+                query=list(vector),
                 limit=limit,
                 query_filter=query_filter,
                 with_payload=True,
             )
+            hits = response.points
         except Exception as exc:
             raise KnowledgeVectorStoreError(
                 "qdrant search failed"
