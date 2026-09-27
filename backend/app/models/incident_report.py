@@ -33,7 +33,8 @@ from __future__ import annotations
 import uuid as _uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.postgres.base import Base
@@ -88,7 +89,7 @@ class IncidentReportRow(Base):
         comment="generated / failed (CHECK-pinned).",
     )
     payload: Mapped[dict | None] = mapped_column(
-        JSON,
+        JSONB,
         nullable=True,
         comment=(
             "The full assembled IncidentReport payload (JSONB).  Present "

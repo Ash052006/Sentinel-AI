@@ -171,7 +171,12 @@ class TestAuthenticationSecurity:
 
 
 class TestHealthEndpoint:
-    """Verify health endpoints work correctly."""
+    """Verify health endpoints work correctly.
+
+    ``/health`` is a public liveness probe.  The dependency probes
+    (``/api/health/database``, ``/api/health/kafka``) disclose
+    infrastructure internals, so they require an authenticated principal.
+    """
 
     def test_health_check_returns_200(self, client: TestClient):
         response = client.get("/health")
@@ -181,11 +186,27 @@ class TestHealthEndpoint:
         assert "database" in data
         assert "environment" in data
 
-    def test_database_health_returns_200(self, client: TestClient):
-        response = client.get("/api/health/database")
+    def test_database_health_returns_200(self, client: TestClient, admin_token: str):
+        response = client.get(
+            "/api/health/database", headers=auth_header(admin_token)
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "connected"
+
+    def test_database_health_requires_authentication(self, client: TestClient):
+        """Anonymous callers must not learn the database name/role."""
+        response = client.get("/api/health/database")
+        assert response.status_code == 401
+        assert "sentinelai" not in response.text
+
+    def test_kafka_health_requires_authentication(self, client: TestClient):
+        response = client.get("/api/health/kafka")
+        assert response.status_code == 401
+
+    def test_liveness_probe_stays_public(self, client: TestClient):
+        """Gating the dependency probes must not gate liveness."""
+        assert client.get("/health").status_code == 200
 
 
 class TestAuditLogSecurity:

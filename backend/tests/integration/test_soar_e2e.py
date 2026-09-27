@@ -41,6 +41,7 @@ from app.models.soar_execution import SoarExecutionRow
 from app.models.soar_step_execution import SoarStepExecutionRow
 from app.models.user import User
 from app.schemas.policy_decision import PolicyDecisionStatus
+from app.services.soar.registry import DEFAULT_SOAR_PROVIDER_REGISTRY
 from tests.conftest import auth_header as _auth_header
 from tests.unit.soar_test_helpers import a_decision, a_request
 
@@ -164,13 +165,27 @@ class TestSoarE2E:
         self, client: TestClient, headers: dict[str, str], db_session: Session
     ) -> None:
         body = a_request()
+        provider = DEFAULT_SOAR_PROVIDER_REGISTRY.provider_for("firewall")
+        baseline = provider.attempt_count
+
         first = client.post(
             "/api/soar/executions", json=body, headers=headers
         ).json()
         _remember(uuid.UUID(first["execution_id"]))
+        after_first = provider.attempt_count
+
         second = client.post(
             "/api/soar/executions", json=body, headers=headers
         ).json()
+
+        # The replay must not re-run the playbook: the idempotency check has
+        # to happen *before* any provider is invoked, not after (a
+        # post-execution row-count check hides a real duplicate containment
+        # action, because the second row is discarded either way).
+        assert after_first == baseline + 1, "first submission did not execute once"
+        assert provider.attempt_count == after_first, (
+            "replayed submission re-invoked the provider"
+        )
         assert second["execution_id"] == first["execution_id"]
         rows = db_session.execute(
             select(SoarExecutionRow).where(

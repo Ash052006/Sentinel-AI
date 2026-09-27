@@ -1,4 +1,5 @@
 import logging
+import uuid
 from collections.abc import Callable, Generator
 
 from fastapi import Depends, HTTPException, Request, status
@@ -31,12 +32,30 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+    )
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-
-    user_id = decode_access_token(credentials.credentials)
+    # A signature-valid token must still carry a usable subject.  A token
+    # minted with a non-UUID ``sub`` would otherwise reach the ``users.id``
+    # comparison and surface a driver-level DataError as HTTP 500.  Anything
+    # that is not a well-formed UUID is an authentication failure, not a
+    # server error.  Genuine database faults are deliberately *not* caught
+    # here: an outage must not be reported as a client auth failure.
+    subject = decode_access_token(credentials.credentials)
+    if not isinstance(subject, str):
+        raise _unauthorized()
+    try:
+        user_id = uuid.UUID(subject)
+    except (ValueError, AttributeError, TypeError):
+        raise _unauthorized() from None
 
     user = db.execute(
         select(User)

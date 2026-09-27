@@ -189,16 +189,36 @@ class SoarService:
     def _repo(self, db: Session) -> SoarRepository:
         return self._repository_factory(db)
 
-    @staticmethod
     def _engine(
+        self,
         db: Session,
         *,
         clock: Callable[[], datetime],
     ) -> SoarEngine:
-        """One engine per call, wired with the V2.16 grant verifier."""
+        """One engine per call, wired with the V2.16 grant verifier.
+
+        The engine's in-memory dedup ledger is scoped to a single engine, so
+        the durable idempotency store is wired in as ``persisted_lookup``:
+        the engine resolves an already-persisted execution for the
+        content-derived key *before* running any playbook step, so a
+        duplicate submission never re-invokes a provider.
+        """
+
+        def _persisted(idempotency_key: str) -> SoarExecutionRecord | None:
+            try:
+                row = self._repo(db).get_execution_by_idempotency_key(idempotency_key)
+            except SQLAlchemyError as exc:
+                raise self._db_error(exc, context="execute idempotency") from exc
+            if row is None:
+                return None
+            return _execution_record(
+                row, steps=self._steps_for(db, row.id, origin="execute dup")
+            )
+
         return SoarEngine(
             approval_verifier=ApprovalGrantVerifier(db, clock=clock),
             clock=clock,
+            persisted_lookup=_persisted,
         )
 
     @staticmethod

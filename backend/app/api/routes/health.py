@@ -8,15 +8,25 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_current_user, get_db
 from app.core.config import settings
+from app.models.user import User
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# The dependency probes below are *not* liveness endpoints.  Unlike the
+# public ``/health`` liveness probe, they disclose infrastructure internals
+# (database name, database role) and broker reachability, so they require an
+# authenticated principal.  Any authenticated SOC role may read them, which
+# matches the frontend System page (it is inside the authenticated shell and
+# sends a bearer token).  Anonymous callers get 401 and learn nothing.
 @router.get("/database")
-def database_health(db: Session = Depends(get_db)):
+def database_health(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
     try:
         result = db.execute(
             text("SELECT current_database(), current_user")
@@ -39,7 +49,7 @@ def database_health(db: Session = Depends(get_db)):
 
 
 @router.get("/kafka")
-def kafka_health():
+def kafka_health(_current_user: User = Depends(get_current_user)):
     """Check Kafka broker connectivity.
 
     This is an independent dependency check — its failure does not

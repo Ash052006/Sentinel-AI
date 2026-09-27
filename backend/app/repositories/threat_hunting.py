@@ -97,7 +97,14 @@ def list_hunts(
     total = db.scalar(count_base) or 0
     items = list(
         db.scalars(
-            base.order_by(ThreatHuntRow.created_at.desc())
+            # ``created_at`` alone is not a total order: rows sharing a
+            # timestamp (fixed-clock runs, bulk imports, same-microsecond
+            # inserts) can be returned in any order, so LIMIT/OFFSET may
+            # repeat or skip a row across pages.  ``hunt_id`` is the
+            # primary key and breaks the tie deterministically.
+            base.order_by(
+                ThreatHuntRow.created_at.desc(), ThreatHuntRow.hunt_id.desc()
+            )
             .limit(page_size)
             .offset((page - 1) * page_size)
         ).all()
@@ -208,7 +215,12 @@ def list_evidence(
         db.scalars(
             select(ThreatHuntEvidenceRow)
             .where(base)
-            .order_by(ThreatHuntEvidenceRow.observed_at.asc().nullslast())
+            # ``observed_at`` alone is not a total order; tie-break on the
+            # primary key so LIMIT/OFFSET cannot duplicate or skip a row.
+            .order_by(
+                ThreatHuntEvidenceRow.observed_at.asc().nullslast(),
+                ThreatHuntEvidenceRow.evidence_id.asc(),
+            )
             .limit(page_size)
             .offset((page - 1) * page_size)
         ).all()

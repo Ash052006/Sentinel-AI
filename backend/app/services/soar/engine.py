@@ -93,6 +93,7 @@ class SoarEngine:
         playbook_registry: SoarPlaybookRegistry | None = None,
         approval_verifier: ApprovalVerifier | None = None,
         clock: Callable[[], datetime] | None = None,
+        persisted_lookup: Callable[[str], SoarExecutionRecord | None] | None = None,
     ) -> None:
         self._providers: SoarProviderRegistry = (
             provider_registry if provider_registry is not None else DEFAULT_SOAR_PROVIDER_REGISTRY
@@ -103,6 +104,11 @@ class SoarEngine:
         self._clock: Callable[[], datetime] = clock or _default_now
         self._gate = SoarPolicyGate(approval_verifier=approval_verifier)
         self._processed: dict[str, SoarExecutionRecord] = {}
+        # Durable dedup.  ``_processed`` only spans one engine instance, so a
+        # long-lived service (which builds an engine per call) needs the
+        # already-persisted record for the content-derived key to avoid
+        # re-running the playbook.  Consulted *before* any provider runs.
+        self._persisted_lookup = persisted_lookup
 
     @property
     def processed_count(self) -> int:
@@ -184,6 +190,11 @@ class SoarEngine:
         already = self._processed.get(key)
         if already is not None:
             return already.model_copy(deep=True)
+        if self._persisted_lookup is not None:
+            persisted = self._persisted_lookup(key)
+            if persisted is not None:
+                self._processed[key] = persisted
+                return persisted.model_copy(deep=True)
         if len(self._processed) >= SOAR_MAX_PROCESSED_KEYS:
             raise SoarInternalError(
                 "the SOAR idempotency store is full; provisioning must be "

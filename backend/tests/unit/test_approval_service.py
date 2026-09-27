@@ -728,16 +728,32 @@ class TestReads:
                 break
             page_num += 1
         assert found
-        pending_page = service.list_requests(
-            db_session,
-            page=1,
-            page_size=MAX_PAGE_SIZE,
-            status=ApprovalStatus.PENDING,
-            clock=_clock,
-        )
-        assert any(
-            item.approval_id == created.approval_id
-            for item in pending_page.items
+        # The status filter must also surface the created record, but the
+        # shared dev DB accumulates pending rows that are *newer* than this
+        # test's injected clock, and the list is ordered requested_at DESC.
+        # Page forward for the same reason as above instead of assuming the
+        # record lands on page 1.
+        pending_found = False
+        pending_page_num = 1
+        while pending_page_num <= 20:
+            pending_page = service.list_requests(
+                db_session,
+                page=pending_page_num,
+                page_size=MAX_PAGE_SIZE,
+                status=ApprovalStatus.PENDING,
+                clock=_clock,
+            )
+            if any(
+                item.approval_id == created.approval_id
+                for item in pending_page.items
+            ):
+                pending_found = True
+                break
+            if pending_page_num * len(pending_page.items) >= pending_page.total:
+                break
+            pending_page_num += 1
+        assert pending_found, (
+            "the PENDING status filter did not surface the created approval"
         )
 
     def test_recent_feed_and_status_filter(

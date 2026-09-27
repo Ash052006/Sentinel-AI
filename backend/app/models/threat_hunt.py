@@ -23,7 +23,8 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.postgres.base import Base
@@ -123,7 +124,7 @@ class ThreatHuntRow(Base):
         comment="When the run completed or failed.",
     )
     filters: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON,
+        JSONB,
         nullable=False,
         default=list,
         comment="Persisted structured filters (JSONB array of objects).",
@@ -310,13 +311,13 @@ class ThreatHuntFindingRow(Base):
         comment="Earliest evidence timestamp in the finding.",
     )
     evidence_ids: Mapped[list[str]] = mapped_column(
-        JSON,
+        JSONB,
         nullable=False,
         default=list,
         comment="Bounded list of hunt-scoped evidence ids (JSONB).",
     )
     context: Mapped[dict[str, Any]] = mapped_column(
-        JSON,
+        JSONB,
         nullable=False,
         default=dict,
         comment="Deterministic grouping context (JSONB; e.g. rule_id, counts).",

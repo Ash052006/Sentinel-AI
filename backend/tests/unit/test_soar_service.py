@@ -38,6 +38,7 @@ from app.services.soar import (
     SoarService,
     SoarValidationError,
 )
+from app.services.soar.registry import DEFAULT_SOAR_PROVIDER_REGISTRY
 from tests.unit.soar_test_helpers import a_request
 
 TZ = timezone.utc
@@ -147,6 +148,44 @@ class TestExecuteLifecycle:
             actor_user_id=ACTOR_ID,
             actor_role=ACTOR_ROLE,
             clock=lambda: FIXED,
+        )
+        assert first.execution_id == second.execution_id
+        assert _count(db, SoarExecutionRow) == 1
+        assert _count(db, SoarStepExecutionRow) == 1
+
+    def test_duplicate_submission_never_reinvokes_provider(self, db, service) -> None:
+        """A duplicate submission must resolve to the original record
+        *without* re-running the playbook.
+
+        The persistence-level dedup is only observable if the provider was
+        not invoked a second time: re-running would re-execute the real
+        containment action even though the second row is discarded.
+        """
+        body = a_request()
+        provider = DEFAULT_SOAR_PROVIDER_REGISTRY.provider_for("firewall")
+        baseline = provider.attempt_count
+
+        first = service.execute(
+            db,
+            body,
+            actor_user_id=ACTOR_ID,
+            actor_role=ACTOR_ROLE,
+            clock=lambda: FIXED,
+        )
+        after_first = provider.attempt_count
+        assert after_first == baseline + 1
+
+        second = service.execute(
+            db,
+            body,
+            actor_user_id=ACTOR_ID,
+            actor_role=ACTOR_ROLE,
+            clock=lambda: FIXED,
+        )
+
+        assert provider.attempt_count == after_first, (
+            "duplicate submission re-invoked the provider; the idempotency "
+            "check happens after execution"
         )
         assert first.execution_id == second.execution_id
         assert _count(db, SoarExecutionRow) == 1

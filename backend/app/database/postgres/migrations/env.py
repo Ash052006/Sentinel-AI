@@ -27,6 +27,18 @@ from app.models.soar_playbook import SoarPlaybookRow
 from app.models.soar_playbook_version import SoarPlaybookVersionRow
 from app.models.soar_execution import SoarExecutionRow
 from app.models.soar_step_execution import SoarStepExecutionRow
+# Every model module must be imported here so its table reaches
+# ``target_metadata``.  ``threat_hunt`` and ``incident_report`` were only
+# present via a transitive import, which means a harmless refactor could drop
+# their tables from the metadata entirely and make autogenerate propose
+# deleting live tables.  Keep this list exhaustive.
+from app.models.threat_hunt import (
+    ThreatHuntEvidenceRow,
+    ThreatHuntFindingRow,
+    ThreatHuntRow,
+    ThreatHuntTimelineItemRow,
+)
+from app.models.incident_report import IncidentReportRow
 
 
 config = context.config

@@ -21,6 +21,7 @@ Static guarantees of the V2.19 design, enforced by AST/source inspection:
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 from app.main import app
@@ -244,6 +245,135 @@ class TestApiIsThinTransport:
         assert "app.services.audit_service" in source
         for module in NEVER_IMPORTED:
             assert module not in source
+
+
+class TestPaginationIsDeterministic:
+    """``ORDER BY created_at DESC`` alone is **not a total order**.
+
+    Rows that share a ``created_at`` (fixed-clock runs, bulk inserts,
+    same-microsecond commits) are returned in an arbitrary, plan-dependent
+    order, so ``LIMIT``/``OFFSET`` can serve a row twice and skip another
+    across pages.  Reproduced on PostgreSQL: with six tied hunts a routine
+    status transition rewrote page 1 from ``(1,2,3)`` to ``(2,3,4)`` and
+    page 2 from ``(4,5,6)`` to ``(5,6,1)`` — row 1 served twice, row 4
+    never served.  The list must break the tie on the primary key, which is
+    what every other paginated repository in the codebase already does.
+
+    The tie-break is asserted structurally because SQLite's sort happens to
+    be stable, so a behavioural test on the unit-test engine cannot observe
+    the defect; PostgreSQL is the engine that actually misbehaves.
+    """
+
+    def test_list_orders_by_created_at_with_primary_key_tiebreak(self) -> None:
+        tree = ast.parse(REPO_FILE.read_text(encoding="utf-8"))
+
+        def _sort_keys(call: ast.Call) -> set[str]:
+            keys: set[str] = set()
+            for arg in call.args:
+                for sub in ast.walk(arg):
+                    if (
+                        isinstance(sub, ast.Attribute)
+                        and isinstance(sub.value, ast.Name)
+                        and sub.value.id == "ThreatHuntRow"
+                    ):
+                        keys.add(sub.attr)
+            return keys
+
+        order_by_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "order_by"
+        ]
+        created_at_orders = [
+            call for call in order_by_calls if "created_at" in _sort_keys(call)
+        ]
+        assert created_at_orders, "the hunt list no longer orders by created_at"
+
+        for call in created_at_orders:
+            keys = _sort_keys(call)
+            assert "hunt_id" in keys, (
+                "the paginated hunt list orders by created_at without a "
+                "primary-key tiebreak; tied timestamps make LIMIT/OFFSET "
+                "duplicate and skip rows"
+            )
+
+    def test_every_paginated_ordering_has_a_unique_tiebreak(self) -> None:
+        """Guard *all* hunt sub-resources, not just the hunt list.
+
+        Evidence was paginated by ``observed_at`` alone — the same defect.
+        Every ``order_by`` that feeds a ``LIMIT``/``OFFSET`` must carry a
+        second, unique sort key.
+        """
+        tree = ast.parse(REPO_FILE.read_text(encoding="utf-8"))
+
+        def _keys(call: ast.Call) -> set[str]:
+            found: set[str] = set()
+            for arg in call.args:
+                for sub in ast.walk(arg):
+                    if (
+                        isinstance(sub, ast.Attribute)
+                        and isinstance(sub.value, ast.Name)
+                        and sub.value.id.startswith("ThreatHunt")
+                    ):
+                        found.add(sub.attr)
+            return found
+
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "order_by"
+            ):
+                continue
+            keys = _keys(node)
+            if len(keys) < 2 and keys:
+                # Single-key ordering: only a problem if the key is not
+                # already the primary key.
+                only = next(iter(keys))
+                if not only.endswith("_id"):
+                    offenders.append(only)
+
+        assert not offenders, (
+            "paginated ordering on a non-unique key without a tiebreak: "
+            + ", ".join(sorted(offenders))
+        )
+
+    def test_paginated_ordering_matches_repository_convention(self) -> None:
+        """Every paginated repository must break timestamp ties on a unique
+        key.  ``threat_hunting`` was the only one that did not."""
+        repos = sorted((BACKEND / "app" / "repositories").glob("*.py"))
+        offenders: list[str] = []
+        for path in repos:
+            source = path.read_text(encoding="utf-8")
+            if "order_by" not in source:
+                continue
+            for lineno, line in enumerate(source.splitlines(), start=1):
+                stripped = line.strip()
+                if not stripped.startswith("order_by("):
+                    continue
+                window = "\n".join(
+                    source.splitlines()[lineno - 1 : lineno + 4]
+                )
+                if not re.search(r"\.limit\(|\.offset\(", window):
+                    continue
+                if not re.search(
+                    r"created_at|requested_at|detected_at|timestamp|updated_at",
+                    window,
+                ):
+                    continue
+                # A timestamp sort with no second key in the same clause.
+                if not re.search(
+                    r"(_id|log_id|memory_id|\bid)\s*\.?(asc|desc)?\(\)?",
+                    window,
+                ) or not re.search(r"\.asc\(\)|\.desc\(\)|\bid\b", window):
+                    offenders.append(f"{path.name}:{lineno}")
+        assert not offenders, (
+            "paginated timestamp ordering without a unique tiebreak: "
+            + ", ".join(offenders)
+        )
 
 
 class TestMigration:

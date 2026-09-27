@@ -359,7 +359,11 @@ class TestReads:
         listing = response.json()
         assert listing["page"] == 1
         assert listing["page_size"] == 50
-        assert len(listing["items"]) == listing["total"]
+        # The listing endpoint paginates: on a shared, non-pristine database
+        # ``total`` counts every matching row while ``items`` holds at most one
+        # bounded page.  Assert the pagination invariant rather than absolute
+        # equality so the test is independent of accumulated DB state.
+        assert len(listing["items"]) == min(listing["total"], listing["page_size"])
         created = client.post(
             "/api/threat-hunts", json=_payload(name="draft-only"), headers=headers
         ).json()
