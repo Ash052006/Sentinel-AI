@@ -429,12 +429,12 @@ class TestDispatchAndSafety:
             DB,
             intent,
             parser_provider="gemini",
-            parser_model="gemini-2.0-flash",
+            parser_model="gemini-3.8-flash",
             clock=lambda: fixed,
         )
         assert resp.read_only is True
         assert resp.metadata.parser_provider == "gemini"
-        assert resp.metadata.parser_model == "gemini-2.0-flash"
+        assert resp.metadata.parser_model == "gemini-3.8-flash"
         assert resp.metadata.recorded_at == fixed
         assert resp.metadata.resource is SOCResource.CORRELATIONS
         assert resp.metadata.operation is SOCOperation.RECENT

@@ -130,6 +130,7 @@ class TestNoArbitraryExecution:
             "executor.py",
             "engine.py",
             "gemini.py",
+            "groq.py",
             "parser.py",
             "formatter.py",
         ):
@@ -198,10 +199,12 @@ class TestOsIsolation:
                         root = alias.name.split(".")[0]
                         assert root in ALLOWED_ROOTS, f"{name} imports {root}"
 
-    def test_only_gemini_uses_http_transport(self) -> None:
+    def test_only_provider_adapters_use_http_transport(self) -> None:
+        # Every other SOC core file must stay free of network transport; only
+        # the provider adapters may import httpx.
         for name, source in _sources().items():
             if "httpx" in source:
-                assert name == "gemini.py"
+                assert name in {"gemini.py", "groq.py"}, name
 
 
 # ---------------------------------------------------------------------------

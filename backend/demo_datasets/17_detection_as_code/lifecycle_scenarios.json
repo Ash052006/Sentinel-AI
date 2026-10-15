@@ -1,0 +1,20 @@
+{
+  "description": "Detection-as-Code (app/services/detection_as_code) scenarios. The runner does NOT create a second rule engine and does NOT modify the shipped rule inventory. It uses the real LifecycleService against a temporary rules root seeded with one synthetic YARA rule, exactly like backend/scripts/detection_as_code_e2e.py, so the shipped 53-rule manifest stays byte-identical. Every version bump, release, deploy and rollback is persisted to PostgreSQL through the real repository and audited.",
+  "controlled_root": "temporary directory (never the shipped app/services/detection/rules root)",
+  "shipped_manifest": "app/services/detection/rules/manifest.yaml (53 rules; hash-verified, never rewritten by this dataset)",
+  "rule_under_test": {
+    "rule_id": "demo-yara-sentinel-beacon-v1",
+    "rule_type": "yara",
+    "source_file": "demo_beacon.yar",
+    "purpose": "Synthetic rule whose condition is a unique marker string, so a positive and a negative fixture can be proven to behave differently."
+  },
+  "scenarios": [
+    {"step": "validate", "purpose": "LifecycleService.validate_rule performs the full gate chain: manifest entry, source file, path traversal, source hash, secret scan, rule type, severity, metadata, compile, positive fixture, negative fixture. Any failure fails closed and nothing is released."},
+    {"step": "release", "purpose": "LifecycleService.release moves the validated version into a release record."},
+    {"step": "deploy", "purpose": "LifecycleService.deploy marks the release deployed; the version then becomes visible in LifecycleService.build_deployed_registry()."},
+    {"step": "build_registry", "purpose": "build_deployed_registry verifies every deployed release (validated state + on-disk source hash) and refuses to build a partial set - it fails closed."},
+    {"step": "evaluate", "purpose": "The real YaraDetectionEngine compiles the deployed source and matches the positive fixture bytes; the negative fixture must not match."},
+    {"step": "version_bump", "purpose": "A 1.1.0 edit to the same rule produces a new version row with a new source hash; releasing and deploying it changes the active registry."},
+    {"step": "rollback", "purpose": "LifecycleService.rollback returns the active deployment to 1.0.0 and records the change with rollback_from set."}
+  ]
+}

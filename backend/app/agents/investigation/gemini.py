@@ -31,6 +31,18 @@ from typing import Any, Callable
 
 import httpx
 
+from app.agents.investigation._transport import (
+    RETRY_BASE_DELAY as _RETRY_BASE_DELAY,
+)
+from app.agents.investigation._transport import (
+    TransientProviderError as _TransientProviderError,
+)
+from app.agents.investigation._transport import (
+    backoff_delay,
+)
+from app.agents.investigation._transport import (
+    retry_after_seconds as _retry_after_seconds,
+)
 from app.agents.investigation.exceptions import (
     InvestigationConfigurationError,
     InvestigationModelOutputError,
@@ -47,20 +59,11 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-#: Backoff base for transient retries (seconds), multiplicative per attempt.
-_RETRY_BASE_DELAY = 1.0
-
-
-class _TransientProviderError(InvestigationProviderError):
-    """Internal marker for retryable server-side failures (5xx).
-
-    Never escapes the provider: consumers observe a regular
-    :class:`InvestigationProviderUnavailableError` after retries exhaust.
-    """
-
-    def __init__(self, status: int, provider: str) -> None:
-        super().__init__(f"server error (HTTP {status})", provider=provider)
-        self.status = status
+# Retry backoff constants and the transient-failure marker now live in
+# app.agents.investigation._transport so the Groq provider shares one
+# implementation of the bounded-retry policy instead of forking it.  They are
+# imported above under their original private names so the behaviour of this
+# client is unchanged.
 
 
 class GeminiClient(InvestigationLLMClient):
@@ -77,15 +80,21 @@ class GeminiClient(InvestigationLLMClient):
             from ``Settings.gemini_max_retries``).
         max_output_tokens: ``maxOutputTokens`` generation bound (default
             from ``Settings.gemini_max_output_tokens``).
-        temperature: Generation temperature (default from
+temperature: Generation temperature (default from
             ``Settings.gemini_temperature``); 0.0 favours determinism.
         endpoint_base: API base URL (default from
             ``Settings.gemini_endpoint_base``).
-        http_client: Optional pre-configured ``httpx.Client`` (tests inject
-            a ``MockTransport`` client; no network is touched).  When
+        http_client: Optional pre-configured ``httpx.Client`` (tests inject a
+            ``MockTransport`` client; no network is touched).  When
             ``None`` a client is created internally with the timeout.
         sleep: Overridable sleeper used for retry backoff (tests inject a
             non-blocking recorder).
+        response_schema: Optional structured-output schema.  Defaults to the
+            investigation schema.  Added so other V3 reasoning agents (e.g.
+            the V3.23 debate agents) reuse *this* provider with their own
+            output contract instead of introducing a second Gemini
+            abstraction.  Only the schema travels on the wire; the caller
+            remains responsible for strictly validating the returned payload.
     """
 
     def __init__(
@@ -100,6 +109,7 @@ class GeminiClient(InvestigationLLMClient):
         endpoint_base: str | None = None,
         http_client: httpx.Client | None = None,
         sleep: Callable[[float], None] | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> None:
         resolved_key = api_key or settings.gemini_api_key
         if not resolved_key:
@@ -155,6 +165,15 @@ class GeminiClient(InvestigationLLMClient):
             else httpx.Client(timeout=self._timeout_seconds)
         )
 
+        # A caller-supplied schema lets another reasoning agent reuse this
+        # provider without forking it.  It is copied so a caller mutating its
+        # dict afterwards cannot change what is sent.
+        self._response_schema: dict[str, Any] = (
+            dict(response_schema)
+            if response_schema is not None
+            else INVESTIGATION_MODEL_JSON_SCHEMA
+        )
+
     @property
     def provider_name(self) -> str:
         return "gemini"
@@ -179,12 +198,12 @@ class GeminiClient(InvestigationLLMClient):
 
     def _build_payload(self, prompt: InvestigationPrompt) -> dict[str, Any]:
         parts: list[dict[str, str]] = [{"text": prompt.content}]
-        if prompt.historical_memory_content:
+        if getattr(prompt, "historical_memory_content", ""):
             # Historical incident memory stays a separate, clearly-labelled
             # part so the reference / instruction boundary survives the wire
             # format (Step 21).
             parts.append({"text": prompt.historical_memory_content})
-        if prompt.knowledge_content:
+        if getattr(prompt, "knowledge_content", ""):
             # Retrieved knowledge stays a separate, clearly-labelled part so
             # the reference / instruction boundary survives the wire format.
             parts.append({"text": prompt.knowledge_content})
@@ -197,16 +216,26 @@ class GeminiClient(InvestigationLLMClient):
                 "temperature": self._temperature,
                 "maxOutputTokens": self._max_output_tokens,
                 "responseMimeType": "application/json",
-                "responseSchema": INVESTIGATION_MODEL_JSON_SCHEMA,
+                "responseSchema": self._response_schema,
             },
         }
 
     # -- Public interface ----------------------------------------------------
 
     def generate(self, prompt: InvestigationPrompt) -> str:
-        if not isinstance(prompt, InvestigationPrompt):
+        # Structural check rather than an isinstance check on one concrete
+        # prompt dataclass, so other V3 reasoning agents can supply their own
+        # prompt object (same four string fields) without a second provider.
+        # A string, dict, or any object missing the fields is still rejected.
+        if not (
+            hasattr(prompt, "system_instruction")
+            and hasattr(prompt, "content")
+            and isinstance(getattr(prompt, "system_instruction", None), str)
+            and isinstance(getattr(prompt, "content", None), str)
+        ):
             raise TypeError(
-                "GeminiClient.generate requires an InvestigationPrompt; "
+                "GeminiClient.generate requires a prompt object exposing "
+                "string 'system_instruction' and 'content' attributes; "
                 f"received {type(prompt).__name__}"
             )
 
@@ -227,9 +256,14 @@ class GeminiClient(InvestigationLLMClient):
     ) -> Any:
         """POST *payload* with bounded retry on transient failures only.
 
-        Retries 5xx server errors, transport-level failures, and timeouts.
-        Never retries 4xx client errors (including rate limits) or
-        authentication failures.
+        Retries 5xx server errors, HTTP 429 rate limits, transport-level
+        failures, and timeouts.  Never retries other 4xx client errors or
+        authentication failures, which cannot succeed on repetition.
+
+        A 429 is retried because it is by definition a *transient* refusal:
+        the provider is asking for back-pressure, not rejecting the request.
+        When the provider supplies a usable ``Retry-After`` the client honours
+        it (bounded by :data:`_MAX_RETRY_SLEEP_SECONDS`) instead of guessing.
         """
         last_exc: Exception | None = None
 
@@ -242,17 +276,18 @@ class GeminiClient(InvestigationLLMClient):
             except _TransientProviderError as exc:
                 last_exc = exc
                 logger.warning(
-                    "gemini server error (attempt %d/%d): HTTP %d",
+                    "gemini transient provider error (attempt %d/%d): HTTP %d",
                     attempt,
                     self._max_retries + 1,
                     exc.status,
                 )
                 if attempt <= self._max_retries:
-                    self._sleep(_RETRY_BASE_DELAY * attempt)
+                    self._sleep(self._backoff(attempt, exc.retry_after))
                     continue
                 raise InvestigationProviderUnavailableError(
-                    f"server error (HTTP {exc.status})",
+                    str(exc),
                     provider=self.provider_name,
+                    retry_after=exc.retry_after_header,
                 ) from exc
             except InvestigationProviderError:
                 raise
@@ -291,6 +326,11 @@ class GeminiClient(InvestigationLLMClient):
 
     # -- Response handling ---------------------------------------------------
 
+    @staticmethod
+    def _backoff(attempt: int, retry_after: float | None) -> float:
+        """Return the sleep before retry *attempt* (shared transport policy)."""
+        return backoff_delay(attempt, retry_after)
+
     def _handle_response(self, response: httpx.Response) -> Any:
         status = response.status_code
 
@@ -305,16 +345,17 @@ class GeminiClient(InvestigationLLMClient):
                 provider=self.provider_name,
             )
         if status == 429:
-            retry_after: float | None = None
-            retry_header = response.headers.get("Retry-After")
-            if retry_header:
-                try:
-                    retry_after = float(retry_header)
-                except (ValueError, TypeError):
-                    pass
-            raise InvestigationProviderUnavailableError(
-                "rate limit exceeded", provider=self.provider_name,
+            # Retryable: the provider is applying back-pressure, not
+            # rejecting the request.  A ``Retry-After`` the client already
+            # honoured above is still reported on the terminal failure so the
+            # caller can see how long the provider asked us to wait.
+            retry_after = _retry_after_seconds(response)
+            raise _TransientProviderError(
+                429,
+                self.provider_name,
                 retry_after=retry_after,
+                retry_after_header=retry_after,
+                message="rate limit exceeded",
             )
         if status == 400:
             raise InvestigationProviderError(

@@ -10,6 +10,7 @@ import { memoriesApi } from '../api/memories'
 import { detectionRulesApi } from '../api/detectionRules'
 import { approvalsApi } from '../api/approvals'
 import { healthApi } from '../api/health'
+import { threatIntelligenceApi } from '../api/threat-intelligence'
 import { useAuthStore } from '../store/auth'
 import type {
   ApprovalRecord,
@@ -20,7 +21,52 @@ import type {
   DetectionRuleAnalytics,
   IncidentMemory,
   RiskAssessment,
+  ThreatIntelIndicatorPage,
+  ThreatIntelIndicatorRecord,
 } from '../types/api'
+
+/**
+ * A real-shaped indicator record, mirroring a `GET
+ * /api/threat-intelligence/indicators` response.  Deliberately ordinary
+ * public indicators: nothing here is malicious, and the record carries no
+ * verdict field because the API does not return one.
+ */
+function tiIndicator(
+  overrides: Partial<ThreatIntelIndicatorRecord> = {},
+): ThreatIntelIndicatorRecord {
+  return {
+    indicator_id: '11111111-1111-4111-8111-111111111111',
+    indicator_type: 'ip',
+    value: '8.8.8.8',
+    canonical_key: 'ip:8.8.8.8',
+    first_seen: '2026-09-27T10:00:00Z',
+    last_seen: '2026-09-28T11:00:00Z',
+    providers: ['VirusTotal', 'abuseipdb'],
+    lookup_count: 2,
+    success_count: 2,
+    error_count: 0,
+    latest_lookup_at: '2026-09-28T11:00:00Z',
+    status: 'enriched',
+    provenance: 'observed',
+    created_at: '2026-09-27T10:00:00Z',
+    updated_at: '2026-09-28T11:00:00Z',
+    ...overrides,
+  }
+}
+
+function tiPage(
+  items: ThreatIntelIndicatorRecord[],
+  total = items.length,
+): ThreatIntelIndicatorPage {
+  return {
+    items,
+    total,
+    page: 1,
+    page_size: 50,
+    read_only: true,
+    verdict_available: false,
+  }
+}
 
 vi.mock('../api/detections', () => ({
   detectionsApi: { recent: vi.fn() },
@@ -50,6 +96,9 @@ vi.mock('../api/approvals', () => ({
 vi.mock('../api/health', () => ({
   healthApi: { database: vi.fn(), kafka: vi.fn() },
 }))
+vi.mock('../api/threat-intelligence', () => ({
+  threatIntelligenceApi: { listIndicators: vi.fn() },
+}))
 
 const DETECTION_API = vi.mocked(detectionsApi)
 const CORRELATIONS_API = vi.mocked(correlationsApi)
@@ -58,6 +107,7 @@ const MEMORIES_API = vi.mocked(memoriesApi)
 const RULES_API = vi.mocked(detectionRulesApi)
 const APPROVALS_API = vi.mocked(approvalsApi)
 const HEALTH_API = vi.mocked(healthApi)
+const TI_API = vi.mocked(threatIntelligenceApi)
 
 const DAY = 86_400_000
 const now = Date.now()
@@ -230,6 +280,7 @@ interface MockOptions {
   rules?: DetectionRule[]
   analytics?: DetectionRuleAnalytics
   approvals?: ApprovalRecord[]
+  indicators?: ThreatIntelIndicatorPage
   reject?: string[]
 }
 
@@ -272,6 +323,10 @@ function installMocks(options: MockOptions = {}) {
   }
   MEMORIES_API.recent.mockResolvedValue(options.memories ?? [memory()])
   APPROVALS_API.recent.mockResolvedValue(options.approvals ?? [])
+  // Threat intelligence now has a real read surface.  It defaults to empty
+  // so pre-existing dashboard assertions keep testing what they were
+  // written to test.
+  TI_API.listIndicators.mockResolvedValue(options.indicators ?? tiPage([]))
   RULES_API.list.mockResolvedValue(
     options.rules ?? [
       ...Array.from({ length: 8 }, (_, i) => rule(`sigma-rule-${i + 1}`, 'sigma')),
@@ -445,7 +500,7 @@ describe('DashboardPage — SOC command center', () => {
     })
   })
 
-  it('keeps threat intelligence and response/policy panels honest when no API serves them', async () => {
+  it('keeps threat intelligence and response/policy panels honest when no indicator is persisted', async () => {
     installMocks()
     renderDash()
 
@@ -459,6 +514,63 @@ describe('DashboardPage — SOC command center', () => {
       .getByText('Response & policy activity')
       .closest('.overflow-hidden') as HTMLElement
     expect(within(policyPanel).getAllByText('0')).toHaveLength(7)
+  })
+
+  it('summarises real persisted threat-intelligence indicators instead of claiming no read API exists', async () => {
+    installMocks({
+      indicators: tiPage([
+        tiIndicator(),
+        tiIndicator({
+          indicator_id: '22222222-2222-4222-8222-222222222222',
+          indicator_type: 'domain',
+          value: 'google.com',
+          canonical_key: 'domain:google.com',
+          providers: ['VirusTotal', 'AlienVault OTX'],
+          lookup_count: 3,
+          success_count: 2,
+          error_count: 1,
+          status: 'partial',
+        }),
+      ]),
+    })
+    renderDash()
+
+    const summary = await screen.findByTestId('ti-summary')
+    // Real values, straight from the API response.
+    expect(summary).toHaveTextContent('8.8.8.8')
+    expect(summary).toHaveTextContent('google.com')
+    expect(within(summary).getAllByTestId('ti-summary-row')).toHaveLength(2)
+    // Honest rollup, and still no verdict language.
+    expect(summary).toHaveTextContent('Provider failures')
+    expect(summary).toHaveTextContent('persists no verdict, severity, or risk')
+    expect(screen.queryByTestId('ti-empty')).not.toBeInTheDocument()
+  })
+
+  it('reports a provider failure as a failure rather than a verdict', async () => {
+    installMocks({
+      indicators: tiPage([
+        tiIndicator({
+          providers: ['VirusTotal'],
+          lookup_count: 2,
+          success_count: 1,
+          error_count: 1,
+          status: 'failed',
+        }),
+      ]),
+    })
+    renderDash()
+
+    const summary = await screen.findByTestId('ti-summary')
+    expect(summary).toHaveTextContent('failed')
+    expect(summary).toHaveTextContent('Provider failures')
+
+    // The failure must be labelled as a provider failure, never as a
+    // verdict.  Check the rendered status badge text rather than the whole
+    // panel, whose caption legitimately names severity/risk to disclaim them.
+    const row = within(summary).getByTestId('ti-summary-row')
+    expect(within(row).getByText('failed')).toBeInTheDocument()
+    expect(within(row).getByText('8.8.8.8')).toBeInTheDocument()
+    expect(row.textContent ?? '').not.toMatch(/malicious|benign|critical|high|medium|low/i)
   })
 
   it('exposes the activity window selector with 30d default and renders a chronological chart', async () => {

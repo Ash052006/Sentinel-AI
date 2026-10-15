@@ -108,7 +108,46 @@ class TestMigration:
                 assert "create_table('approval" not in source, py.name
                 assert "alter_table('approval" not in source, py.name
                 continue
+            if "b8c9d0e1f2a3" in py.name:
+                # V3.25: the playbook migration must name the
+                # ``approval_required`` lifecycle and the per-action
+                # ``approval_requirement`` classification, because a proposal
+                # that needs a human gate has to be able to say so.
+                #
+                # What it must never contain is a *mechanism*: the
+                # ``approval_required`` literal is a recommendation about a
+                # pending gate, and granting it belongs to the V2.16
+                # approval tables alone.
+                assert "approval_requests" not in source, py.name
+                for forbidden in (
+                    "create_table('approval",
+                    "alter_table('approval",
+                    "drop_table('approval",
+                    "approval.request",
+                    "approved_by",
+                    "approved_at",
+                    "approval_token",
+                    "auto_approve",
+                    "autoapprove",
+                ):
+                    assert forbidden not in source.lower(), py.name
+                continue
             assert "approval" not in source.lower(), py.name
+
+    def test_playbook_migration_records_a_recommendation_not_a_grant(self) -> None:
+        """The V3.25 approval columns are advice, and the column names say so."""
+        migration = (
+            MIGRATIONS_DIR / "b8c9d0e1f2a3_create_playbook_tables.py"
+        )
+        source = migration.read_text(encoding="utf-8")
+        assert "'approval_requirement'" in source
+        # The lifecycle constraint may only ever offer the two generation
+        # outcomes; approving is not a state this schema can hold.
+        assert (
+            "lifecycle IN ('proposed', 'approval_required')" in source
+        ), "the lifecycle constraint must exclude every post-generation state"
+        for downstream in ("'approved'", "'executing'", "'executed'", "'verified'"):
+            assert downstream not in source, downstream
 
 
 class TestNoAutoApproval:

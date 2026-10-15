@@ -1,0 +1,111 @@
+{
+  "description": "Every source carries the identity of the prior record it points at, because MemorySource refuses a provenance category without its matching source identity. These ids belong to the previously closed 2026-08-14 incident; the current scenario's ids are minted at run time and are never reused here.",
+  "schema": "app.services.incident_memory.input.IncidentMemoryInput",
+  "title": "DEMO-2026-08-14 staging host credential-theft attempt",
+  "summary": "Previously closed incident: a loader executed from a temp directory on a staging web host, downloaded a second stage and was blocked at the egress firewall. Recorded here so the current investigation has genuine historical context.",
+  "confidence": 0.72,
+  "sources": [
+    {
+      "source_id": "8f1a0c22-0001-4a10-9a01-0d0e0f101111",
+      "provenance": "correlated",
+      "label": "prior staging-host correlation",
+      "metadata": {
+        "demo_dataset": "14_incident_memory/historical_incident.json"
+      },
+      "correlation_id": "8f1a0c22-1000-4a10-9a01-0d0e0f101111"
+    },
+    {
+      "source_id": "8f1a0c22-0002-4a10-9a01-0d0e0f101111",
+      "provenance": "risk_assessed",
+      "label": "prior risk assessment",
+      "metadata": {
+        "demo_dataset": "14_incident_memory/historical_incident.json"
+      },
+      "risk_assessment_id": "8f1a0c22-2000-4a10-9a01-0d0e0f101111"
+    }
+  ],
+  "indicators": [
+    {
+      "indicator_id": "8f1a0c22-0011-4a10-9a01-0d0e0f101111",
+      "indicator_type": "ip",
+      "value": "198.51.100.23",
+      "metadata": {
+        "note": "egress destination in the prior incident"
+      }
+    },
+    {
+      "indicator_id": "8f1a0c22-0012-4a10-9a01-0d0e0f101111",
+      "indicator_type": "domain",
+      "value": "payload-delivery.top",
+      "metadata": {
+        "note": "delivery domain reused by the prior loader"
+      }
+    },
+    {
+      "indicator_id": "8f1a0c22-0013-4a10-9a01-0d0e0f101111",
+      "indicator_type": "ip",
+      "value": "198.51.100.24",
+      "metadata": {
+        "note": "second egress destination in the prior incident"
+      }
+    }
+  ],
+  "entities": [
+    {
+      "entity_id": "8f1a0c22-0021-4a10-9a01-0d0e0f101111",
+      "entity_type": "host",
+      "identifier": "STAGE-WEB-02.contoso.example",
+      "metadata": {
+        "role": "affected host"
+      }
+    }
+  ],
+  "techniques": [
+    {
+      "technique_id": "8f1a0c22-0031-4a10-9a01-0d0e0f101111",
+      "technique_code": "temp-directory-execution",
+      "metadata": {
+        "note": "author-defined technique label, not a MITRE id"
+      }
+    },
+    {
+      "technique_id": "8f1a0c22-0032-4a10-9a01-0d0e0f101111",
+      "technique_code": "temp-directory-execution",
+      "metadata": {
+        "note": "author-defined technique label, not a MITRE id"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "8f1a0c22-0041-4a10-9a01-0d0e0f101111",
+      "finding_type": "initial_access",
+      "title": "Second stage delivered over cleartext HTTP from a documentation-range host",
+      "confidence": 0.68
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "8f1a0c22-0051-4a10-9a01-0d0e0f101111",
+      "action_type": "block_ip",
+      "metadata": {
+        "target": "198.51.100.23",
+        "provider": "mock"
+      }
+    },
+    {
+      "action_id": "8f1a0c22-0052-4a10-9a01-0d0e0f101111",
+      "action_type": "block_ip",
+      "metadata": {
+        "target": "198.51.100.24",
+        "provider": "mock"
+      }
+    }
+  ],
+  "outcome": {
+    "outcome_status": "contained",
+    "metadata": {
+      "note": "egress block held; host was rebuilt"
+    }
+  }
+}

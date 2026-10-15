@@ -1595,6 +1595,223 @@ class TestHttpErrors:
         finally:
             provider.close()
 
+
+# ===========================================================================
+# H2. OTX-supplied refusal reasons must survive into the provider error
+# ===========================================================================
+
+# The exact indicator that produced the observed production failure: OTX
+# answers an RFC1918 address with HTTP 400 and its own explanation, which the
+# provider used to discard in favour of a generic "malformed indicator" guess.
+PRIVATE_IP_VALUE = "10.20.30.40"
+PRIVATE_IP_DETAIL = "IP is private."
+
+
+class TestOtxSuppliedReason:
+    """OTX's own ``detail`` is the truthful reason; never discard it.
+
+    Regression cover for the observed failure where a private (RFC1918)
+    indicator reported ``bad request -- malformed indicator or API usage
+    error``.  The indicator is a perfectly valid IPv4 address and the request
+    was well formed: OTX simply holds no intelligence for private space and
+    says so in the body.  Discarding that body produced a factually wrong
+    reason that misdirects the analyst toward their own request.
+    """
+
+    def test_private_ip_reports_otxs_own_reason(self):
+        """The failing indicator type/value must yield OTX's real reason."""
+        captured: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            return httpx.Response(
+                400, json={"detail": PRIVATE_IP_DETAIL}, request=request
+            )
+
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(handler),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator(IndicatorType.IP, PRIVATE_IP_VALUE))
+            message = str(excinfo.value)
+            assert PRIVATE_IP_DETAIL in message
+            # The refusal must no longer be attributed to a malformed
+            # indicator: that claim was never made by OTX and is false.
+            assert "malformed indicator" not in message
+            assert "bad request" in message
+            assert SECRET_KEY not in message
+            # The request itself was still well formed and correctly routed.
+            assert captured["url"] == (
+                f"{BASE_URL}/indicators/IPv4/{PRIVATE_IP_VALUE}/general"
+            )
+        finally:
+            provider.close()
+
+    def test_private_ip_is_not_retried(self):
+        """A client-side refusal is deterministic: retrying cannot help."""
+        calls = {"count": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["count"] += 1
+            return httpx.Response(
+                400, json={"detail": PRIVATE_IP_DETAIL}, request=request
+            )
+
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(handler),
+        )
+        try:
+            with pytest.raises(ProviderLookupError):
+                provider.lookup(_indicator(IndicatorType.IP, PRIVATE_IP_VALUE))
+            assert calls["count"] == 1
+        finally:
+            provider.close()
+
+    def test_generic_reason_is_kept_when_otx_sends_no_detail(self):
+        """No ``detail`` must fall back to the pre-existing generic reason."""
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(400, json={}, request=req),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            assert (
+                "bad request -- malformed indicator or API usage error"
+                in str(excinfo.value)
+            )
+        finally:
+            provider.close()
+
+    @pytest.mark.parametrize(
+        "status,expected",
+        [
+            (404, "not found -- no OTX record for this indicator"),
+            (418, "unexpected HTTP status 418"),
+        ],
+    )
+    def test_other_error_statuses_also_surface_otx_detail(self, status, expected):
+        """The detail is recovered for every mapped error status, not just 400."""
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(
+                    status, json={"detail": PRIVATE_IP_DETAIL}, request=req
+                ),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            message = str(excinfo.value)
+            assert PRIVATE_IP_DETAIL in message
+            assert expected not in message
+        finally:
+            provider.close()
+
+    def test_unparsable_body_falls_back_to_generic_reason(self):
+        """A non-JSON error body must not raise out of the detail recovery."""
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(
+                    400,
+                    content=b"<html>gateway error</html>",
+                    headers={"content-type": "text/html"},
+                    request=req,
+                ),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            assert "bad request" in str(excinfo.value)
+            assert "<html>" not in str(excinfo.value)
+            assert SECRET_KEY not in str(excinfo.value)
+        finally:
+            provider.close()
+
+    def test_oversized_detail_is_bounded(self):
+        """A hostile/large ``detail`` cannot flood a persisted reason string."""
+        huge = "x" * 5000
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(
+                    400, json={"detail": huge}, request=req
+                ),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            message = str(excinfo.value)
+            assert "x" * 5000 not in message
+            assert len(message) < 300
+        finally:
+            provider.close()
+
+    def test_multiline_detail_is_collapsed(self):
+        """A multi-line ``detail`` is collapsed so the reason stays one line."""
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(
+                    400,
+                    json={"detail": "IP is private.\nSee RFC 1918."},
+                    request=req,
+                ),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            message = str(excinfo.value)
+            assert "IP is private. See RFC 1918." in message
+        finally:
+            provider.close()
+
+    def test_detail_never_displaces_auth_failures(self):
+        """401/403 keep their own reasons; only the key is the problem there."""
+        for status, expected in ((401, "unauthorized"), (403, "forbidden")):
+            provider = AlienVaultOTXProvider(
+                api_key=SECRET_KEY,
+                http_client=_make_client(
+                    lambda req, s=status: httpx.Response(
+                        s, json={"detail": PRIVATE_IP_DETAIL}, request=req
+                    ),
+                ),
+            )
+            try:
+                with pytest.raises(ProviderLookupError) as excinfo:
+                    provider.lookup(_indicator())
+                assert expected in str(excinfo.value)
+            finally:
+                provider.close()
+
+    def test_http_200_api_error_body_surfaces_detail(self):
+        """The HTTP 200 ``detail`` guard now reports OTX's reason too."""
+        provider = AlienVaultOTXProvider(
+            api_key=SECRET_KEY,
+            http_client=_make_client(
+                lambda req: httpx.Response(
+                    200, json={"detail": PRIVATE_IP_DETAIL}, request=req
+                ),
+            ),
+        )
+        try:
+            with pytest.raises(ProviderLookupError) as excinfo:
+                provider.lookup(_indicator())
+            assert "API error" in str(excinfo.value)
+            assert PRIVATE_IP_DETAIL in str(excinfo.value)
+        finally:
+            provider.close()
+
 # ===========================================================================
 # I. Retry & timeout behaviour
 # ===========================================================================

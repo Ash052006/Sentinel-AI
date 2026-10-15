@@ -1,8 +1,10 @@
 from fastapi import APIRouter
 
 from app.api.routes import (
+    debates,
     approvals,
     attack_paths,
+    attack_predictions,
     audit,
     auth,
     correlations,
@@ -11,11 +13,16 @@ from app.api.routes import (
     detections,
     health,
     incident_memories,
+    ingest,
     incident_reports,
+    investigations,
+    knowledge_graph,
+    playbooks,
     risks,
     soc,
     soar,
     threat_hunts,
+    threat_intelligence,
     users,
 )
 
@@ -56,6 +63,12 @@ api_router.include_router(
     detections.analyses_router,
     prefix="/detection-analyses",
     tags=["Detections"],
+)
+
+api_router.include_router(
+    ingest.router,
+    prefix="/ingest",
+    tags=["Ingest"],
 )
 
 api_router.include_router(
@@ -113,9 +126,27 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    investigations.router,
+    prefix="/investigations",
+    tags=["Investigations"],
+)
+
+api_router.include_router(
     attack_paths.router,
     prefix="/attack-paths",
     tags=["Attack Paths"],
+)
+
+api_router.include_router(
+    attack_predictions.router,
+    prefix="/attack-predictions",
+    tags=["Attack Predictions"],
+)
+
+api_router.include_router(
+    playbooks.router,
+    prefix="/playbooks",
+    tags=["Playbooks"],
 )
 
 api_router.include_router(
@@ -123,3 +154,29 @@ api_router.include_router(
     prefix="/soc",
     tags=["Natural Language SOC"],
 )
+
+api_router.include_router(
+    threat_intelligence.router,
+    prefix="/threat-intelligence",
+    tags=["Threat Intelligence"],
+)
+
+api_router.include_router(
+    knowledge_graph.router,
+    prefix="/knowledge-graph",
+    tags=["Knowledge Graph"],
+)
+api_router.include_router(
+    debates.router,
+    prefix="/debates",
+    tags=["Debates"],
+)
+try:
+    from app.api.routes import digital_twin
+    api_router.include_router(
+        digital_twin.router,
+        prefix="/digital-twin",
+        tags=["Digital Twin"],
+    )
+except Exception:
+    pass

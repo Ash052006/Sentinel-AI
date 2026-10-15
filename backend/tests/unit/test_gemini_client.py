@@ -28,7 +28,7 @@ from app.agents.investigation.model_output import INVESTIGATION_MODEL_JSON_SCHEM
 from app.agents.investigation.prompt import InvestigationPrompt
 
 _API_KEY = "test-gemini-api-key"
-_MODEL = "gemini-2.0-flash"
+_MODEL = "gemini-3.8-flash"
 _BASE = "https://generativelanguage.googleapis.com"
 
 
@@ -249,20 +249,113 @@ def test_client_errors_not_retried(status, error_class):
 
 
 def test_rate_limit_parses_retry_after():
-    response = httpx.Response(
-        429, json={}, headers={"Retry-After": "17"}
-    )
-    client = _client(response)
+    # A rate limit is a transient refusal, so the client retries it.  The
+    # handler therefore answers *every* attempt with 429 rather than popping
+    # a single scripted response.
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(
+            429, json={}, headers={"Retry-After": "17"}, request=request
+        )
+
+    client = _client(rate_limited, sleeps=sleeps, max_retries=2)
     with pytest.raises(InvestigationProviderUnavailableError) as excinfo:
         client.generate(_prompt())
     assert excinfo.value.retry_after == 17.0
+    # Retried up to the bounded budget, then surfaced as provider-unavailable.
+    assert attempts["n"] == 3
+    # The provider's own pacing hint is honoured instead of a guessed backoff.
+    assert sleeps == [17.0, 17.0]
 
 
 def test_rate_limit_without_retry_after():
-    client = _client(httpx.Response(429, json={}))
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(429, json={}, request=request)
+
+    client = _client(rate_limited, sleeps=sleeps, max_retries=1)
     with pytest.raises(InvestigationProviderUnavailableError) as excinfo:
         client.generate(_prompt())
     assert excinfo.value.retry_after is None
+    assert attempts["n"] == 2
+    # No usable header: fall back to the client's own bounded linear backoff.
+    assert sleeps == [1.0]
+
+
+def test_rate_limit_recovers_on_retry():
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(
+                429,
+                json={},
+                headers={"Retry-After": "2"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "recovered text"}]},
+                        "finishReason": "STOP",
+                    }
+                ]
+            },
+            request=request,
+        )
+
+    client = _client(handler, sleeps=sleeps, max_retries=2)
+    result = client.generate(_prompt())
+    assert attempts["n"] == 2
+    assert result == "recovered text"
+    assert sleeps == [2.0]
+
+
+def test_unparsable_retry_after_falls_back_to_backoff():
+    sleeps: list[float] = []
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        # HTTP-date form: unparsable as a delta, so it must not be trusted.
+        return httpx.Response(
+            429,
+            json={},
+            headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+            request=request,
+        )
+
+    client = _client(rate_limited, sleeps=sleeps, max_retries=1)
+    with pytest.raises(InvestigationProviderUnavailableError) as excinfo:
+        client.generate(_prompt())
+    assert excinfo.value.retry_after is None
+    assert sleeps == [1.0]
+
+
+def test_absurd_retry_after_is_clamped():
+    sleeps: list[float] = []
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={},
+            headers={"Retry-After": "999999"},
+            request=request,
+        )
+
+    client = _client(rate_limited, sleeps=sleeps, max_retries=1)
+    with pytest.raises(InvestigationProviderUnavailableError):
+        client.generate(_prompt())
+    # Bounded: a hostile header cannot turn a bounded retry into a stall.
+    assert sleeps == [30.0]
 
 
 # ---------------------------------------------------------------------------

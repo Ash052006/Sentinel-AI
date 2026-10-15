@@ -30,7 +30,7 @@ from app.services.soc.errors import (
     SOCModelOutputError,
 )
 from app.services.soc.executor import SOCQueryExecutor
-from app.services.soc.gemini import GeminiSOCIntentParser
+from app.services.soc.groq import GroqSOCIntentParser
 from app.services.soc.parser import SOCIntentParser, SOCParseResult
 from app.services.soc.registry import QueryHandler
 
@@ -191,28 +191,28 @@ class TestPipeline:
 
 
 class TestLazyDefaultParser:
-    def test_unconfigured_gemini_yields_sanitized_config_error(
+    def test_unconfigured_groq_yields_sanitized_config_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.core.config import settings
 
-        monkeypatch.setattr(settings, "gemini_api_key", "")
+        monkeypatch.setattr(settings, "groq_api_key", "")
         svc = engine_mod.SOCQueryService(
             executor=SOCQueryExecutor(handlers=_handlers_recent_detections())
         )
         with pytest.raises(SOCConfigurationError):
             svc.query(object(), "show recent detections")
 
-    def test_configured_gemini_builds_real_parser(
+    def test_configured_groq_builds_real_parser(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.core.config import settings
 
-        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+        monkeypatch.setattr(settings, "groq_api_key", "test-key")
         svc = engine_mod.SOCQueryService()
         parser = svc._resolve_parser()
-        assert isinstance(parser, GeminiSOCIntentParser)
-        assert parser.provider_name == "gemini"
+        assert isinstance(parser, GroqSOCIntentParser)
+        assert parser.provider_name == "groq"
         # Cached — a second resolution returns the same instance.
         assert svc._resolve_parser() is parser
 

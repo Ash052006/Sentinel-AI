@@ -14,7 +14,9 @@ Design principles:
 * **Persisted view** — a record mirrors a database row: the structured
   JSONB ``factors`` / ``evidence`` come back as plain lists of dicts and
   ``assessment_metadata`` as a plain ``dict`` payload, ``score`` /
-  ``confidence`` are ``0.0..1.0`` floats persisted exactly as produced,
+  ``confidence`` are ``0.0..1.0`` floats persisted exactly as produced
+  (``confidence`` is nullable, recording that the source correlation
+  asserted none),
   ``level`` is the controlled :class:`~app.schemas.risk.RiskLevel`
   enumeration, ``provenance`` is the ``RISK_ASSESSED`` marker every
   persisted row carries, and timestamps are timezone-aware UTC instants.
@@ -101,13 +103,15 @@ class RiskAssessmentRecord(BaseModel):
             "persisted exactly as scored.  Never re-derived from score."
         ),
     )
-    confidence: float = Field(
+    confidence: float | None = Field(
         ...,
         ge=0.0,
         le=1.0,
         description=(
             "Step 11B assessment confidence in [0.0, 1.0].  Independent of "
-            "score/level; persisted exactly."
+            "score/level; persisted exactly.  Null means the source "
+            "correlation asserted no confidence, so none was produced; it "
+            "does not mean zero confidence."
         ),
     )
     factors: list[dict[str, Any]] = Field(

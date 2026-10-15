@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, FlaskConical, Play } from 'lucide-react'
+import { ApiError } from '../api/client'
 import { soarApi } from '../api/soar'
+import { approvalsApi } from '../api/approvals'
 import { EmptyState, ErrorState, LoadingRows, NotAvailable } from '../components/states'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, Panel, Stat } from '../components/ui/card'
 import { MonoId } from '../components/ui/mono-id'
-import { Input, Select } from '../components/ui/input'
+import { Select } from '../components/ui/input'
 import { Td, Th, TRow, Table } from '../components/ui/table'
 import { formatTimestamp } from '../lib/formats'
 import type {
+  ApprovalRecord,
   SoarDryRunResult,
   SoarExecutionRecord,
   SoarExecutionRequest,
@@ -19,11 +22,6 @@ import type {
   SoarStepExecutionRecord,
   SoarStepStatus,
 } from '../types/api'
-
-type SoarDemoOption = {
-  playbook_id: string
-  primary_action: SoarExecutionRequest['decision']['requested_action']
-}
 
 const PAGE_SIZE = 50
 
@@ -79,6 +77,11 @@ export function SoarPage() {
     queryFn: () => soarApi.executions(page, PAGE_SIZE),
   })
 
+  const approvals = useQuery({
+    queryKey: ['approvals', 'list', 'approved', 200],
+    queryFn: () => approvalsApi.list(1, 200, 'approved'),
+  })
+
   const playbookDetail = useQuery({
     queryKey: ['soar', 'playbook', selectedPlaybook],
     queryFn: () => soarApi.playbook(selectedPlaybook as string),
@@ -97,8 +100,13 @@ export function SoarPage() {
       setNotice('Sandbox SOAR action completed in the mock environment.')
       void queryClient.invalidateQueries({ queryKey: ['soar'] })
     },
-    onError: () => {
-      setNotice('The sandbox SOAR operation was rejected by the service.')
+    onError: (error: unknown) => {
+      // Surface the sanitized server detail rather than a generic rejection:
+      // SOAR mutations require the admin role, so a 403 here is a
+      // permissions fact the reviewer needs to see, not a playbook fault.
+      const detail =
+        error instanceof ApiError ? error.detail : String(error)
+      setNotice(`SOAR refused the run: ${detail}`)
     },
   })
 
@@ -107,6 +115,7 @@ export function SoarPage() {
 
   const playbookRows = useMemo(() => playbooks.data?.items ?? [], [playbooks.data])
   const executionRows = useMemo(() => executions.data?.items ?? [], [executions.data])
+  const approvalRows = useMemo(() => approvals.data?.items ?? [], [approvals.data])
 
   const selected = playbookDetail.data
   const execSelected = executionDetail.data
@@ -142,12 +151,13 @@ export function SoarPage() {
       </div>
 
       <Panel
-        title="Sandbox demo run"
-        subtitle="Fabricates an ALLOWED policy decision purely to exercise the sandbox orchestrator — real runs are driven only by the governed decision engine (this demo does not impersonate it)."
+        title="Run under a real approval grant"
+        subtitle="Executes with the verbatim policy decision persisted on an APPROVED approval request, plus that request's approval_id, so the backend gate verifies a durable grant rather than a client-asserted outcome."
         data-testid="soar-demo-panel"
       >
-        <DemoRun
+        <AuthorisedRun
           playbooks={playbookRows}
+          approvals={approvalRows}
           busy={mutation.isPending}
           onDryRun={(body) => runSoar(() => soarApi.dryRun(body))}
           onExecute={(body) => runSoar(() => soarApi.execute(body))}
@@ -334,72 +344,97 @@ export function SoarPage() {
   )
 }
 
-function buildDemoDecision(
-  action: SoarExecutionRequest['decision']['requested_action'],
-): SoarExecutionRequest['decision'] {
-  return {
-    policy_decision_id: crypto.randomUUID(),
-    correlation_id: crypto.randomUUID(),
-    requested_action: action,
-    decision: 'allowed',
-    reason: 'Sandbox demo decision — ALLOWED by fabricated policy context.',
-    policy_rule_id: 'POLICY-SOAR-SANDBOX-DEMO',
-    risk_level: 'high',
-    requires_approval: false,
-    timestamp: new Date().toISOString(),
-    provenance: 'policy_decided',
-  }
-}
-
-const DEMO_PLAYBOOK_IDS: SoarDemoOption[] = [
-  { playbook_id: 'block_ip', primary_action: 'block_ip' },
-  { playbook_id: 'block_domain', primary_action: 'block_domain' },
-  { playbook_id: 'isolate_endpoint', primary_action: 'isolate_endpoint' },
-  { playbook_id: 'disable_account', primary_action: 'disable_account' },
-  { playbook_id: 'endpoint_containment', primary_action: 'isolate_endpoint' },
-]
-
-function DemoRun({
+function AuthorisedRun({
   playbooks,
+  approvals,
   busy,
   onDryRun,
   onExecute,
 }: {
   playbooks: SoarPlaybookRecord[]
+  approvals: ApprovalRecord[]
   busy: boolean
   onDryRun: (body: SoarExecutionRequest) => void
   onExecute: (body: SoarExecutionRequest) => void
 }) {
-  const [playbookId, setPlaybookId] = useState('block_ip')
-  const [target, setTarget] = useState('203.0.113.7')
+  // Only a durable APPROVED grant satisfies the backend gate: it requires an
+  // approval_id plus a matching policy_decision_id and action_type.
+  const grants = approvals.filter(
+    (approval) => approval.status === 'approved' && approval.decision,
+  )
 
-  const options: SoarDemoOption[] =
-    playbooks.length > 0
-      ? playbooks.map((p) => ({ playbook_id: p.playbook_id, primary_action: p.primary_action }))
-      : DEMO_PLAYBOOK_IDS
+  const [approvalId, setApprovalId] = useState<string>('')
+  const grant = grants.find((g) => g.approval_id === approvalId) ?? grants[0]
 
-  const selected = options.find((o) => o.playbook_id === playbookId) ?? options[0]
-  const action: SoarExecutionRequest['decision']['requested_action'] =
-    selected?.primary_action ?? 'block_ip'
+  const action = grant?.decision?.requested_action
+
+  const matching: SoarPlaybookRecord[] = playbooks.filter(
+    (p) => !action || p.primary_action === action,
+  )
+  const [playbookId, setPlaybookId] = useState('')
+  const playbook =
+    matching.find((p) => p.playbook_id === playbookId) ?? matching[0]
+
+  const target = grant?.target ?? ''
+
+  if (grants.length === 0) {
+    return (
+      <EmptyState
+        title="No approved grant available"
+        body="SOAR refuses to run without a verifiable human approval grant. Approve a pending request on the Approvals page, then return here."
+      />
+    )
+  }
+
+  if (!grant?.decision || !playbook) {
+    return (
+      <EmptyState
+        title="No playbook matches this grant"
+        body={`No registered playbook has primary_action=${action ?? 'unknown'} for the selected grant.`}
+      />
+    )
+  }
+
+  // Captured after the guards above so the closure keeps the narrowed,
+  // non-optional decision type instead of re-reading the nullable field.
+  const approvedDecision = grant.decision
 
   const body = (): SoarExecutionRequest => ({
-    playbook_id: playbookId,
+    playbook_id: playbook.playbook_id,
     target,
     response_id: crypto.randomUUID(),
-    decision: buildDemoDecision(action),
+    approval_id: grant.approval_id,
+    decision: approvedDecision,
   })
 
   return (
     <div className="flex flex-wrap items-end gap-3" data-testid="soar-demo-controls">
       <div className="space-y-1">
+        <div className="text-[10px] uppercase tracking-wider text-ink-faint">
+          Approval grant
+        </div>
+        <Select
+          aria-label="Approval grant"
+          className="h-8 text-[11px]"
+          value={grant.approval_id}
+          onChange={(event) => setApprovalId(event.target.value)}
+        >
+          {grants.map((g) => (
+            <option key={g.approval_id} value={g.approval_id}>
+              {g.action_type} · {g.target} · {g.policy_rule_id}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-1">
         <div className="text-[10px] uppercase tracking-wider text-ink-faint">Playbook</div>
         <Select
           aria-label="Playbook"
           className="h-8 text-[11px]"
-          value={playbookId}
+          value={playbook.playbook_id}
           onChange={(event) => setPlaybookId(event.target.value)}
         >
-          {options.map((o) => (
+          {matching.map((o) => (
             <option key={o.playbook_id} value={o.playbook_id}>
               {o.playbook_id}
             </option>
@@ -407,13 +442,12 @@ function DemoRun({
         </Select>
       </div>
       <div className="space-y-1">
-        <div className="text-[10px] uppercase tracking-wider text-ink-faint">Target identifier</div>
-        <Input
-          aria-label="Target identifier"
-          className="h-8 w-64 text-[11px] font-mono"
-          value={target}
-          onChange={(event) => setTarget(event.target.value)}
-        />
+        <div className="text-[10px] uppercase tracking-wider text-ink-faint">
+          Target (from grant)
+        </div>
+        <div className="flex h-8 items-center px-2 font-mono text-[11px] text-ink-dim">
+          {target}
+        </div>
       </div>
       <div className="flex gap-2">
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onDryRun(body())}>
@@ -426,9 +460,13 @@ function DemoRun({
         </Button>
       </div>
       <p className="w-full text-[11px] leading-relaxed text-ink-dim">
-        Executes only through the in-memory mock providers against target{' '}
-        <span className="font-mono">{target}</span>. The fabricated decision is the only demo-specific input; every real
-        execution is gated by the policy decision engine and, when required, the V2.16 human approval grant.
+        Runs only through the in-memory mock providers against target{' '}
+        <span className="font-mono">{target}</span>. The decision is the verbatim
+        snapshot persisted on approval{' '}
+        <span className="font-mono">{grant.approval_id}</span> (
+        <span className="font-mono">{grant.policy_rule_id}</span>), submitted
+        with its <span className="font-mono">approval_id</span> so the backend
+        gate verifies a real durable grant.
       </p>
     </div>
   )

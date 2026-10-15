@@ -57,7 +57,7 @@ export function SearchResultsPage() {
         <Panel>
           <EmptyState
             title="Ask the SOC querier"
-            body="Try: recent detections · highest risk correlations · active incidents · critical event traffic · search event 8f9c…"
+            body="Try: recent detections · recent correlations · critical risk assessments · correlations for event 8f9c…"
           />
         </Panel>
       ) : result.isLoading ? (

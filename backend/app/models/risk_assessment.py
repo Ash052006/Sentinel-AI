@@ -156,13 +156,15 @@ class RiskAssessment(UUIDTimestampMixin, Base):
         ),
     )
 
-    confidence: Mapped[float] = mapped_column(
+    confidence: Mapped[float | None] = mapped_column(
         Float,
-        nullable=False,
+        nullable=True,
         comment=(
             "Step 11B assessment confidence in [0.0, 1.0] "
             "(CHECK-constrained), persisted exactly as produced.  "
-            "Independent of score/level; never a risk score."
+            "Independent of score/level; never a risk score.  "
+            "NULL means the source correlation asserted no confidence, so "
+            "none was produced -- it does not mean zero confidence."
         ),
     )
 

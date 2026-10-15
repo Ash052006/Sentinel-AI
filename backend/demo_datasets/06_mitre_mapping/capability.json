@@ -1,0 +1,21 @@
+{
+  "description": "MITRE ATT&CK mapping (06) \u2014 NOT A SENTINELAI V2 CAPABILITY. This file exists to document the gap honestly rather than to fake a mapping. Every SentinelAI V2 agent explicitly disclaims technique mapping: app/agents/correlation.py and app/agents/risk_scoring.py state they do not 'map MITRE ATT&CK', app/schemas/detection_agent.py enforces 'No fabrication - no MITRE mapping', and app/schemas/knowledge.py's MITRE_ATTACK knowledge-source enum has no producer, no table, no route and no test. There is no DetectionRule field for techniques and no ATT&CK data anywhere in app/services/detection/rules/manifest.yaml. The runner therefore reports the absent capability instead of writing a mapping.",
+  "capability_present": false,
+  "evidence_of_absence": [
+    "app/agents/correlation.py:12 - 'no incidents, map MITRE ATT&CK, or perform response; those belong to later'",
+    "app/agents/risk_scoring.py:12 - 'expose an API, create incidents, map MITRE ATT&CK, or perform response'",
+    "app/schemas/detection.py:138 - RuleReference documents MITRE ids as an example but defines no field for them",
+    "app/schemas/detection_agent.py:19 - 'No fabrication - no risk scores, no verdicts, no MITRE mapping.'",
+    "app/services/detection/rules/manifest.yaml - 53 rules, none declaring an ATT&CK technique"
+  ],
+  "what_the_runner_reports": [
+    "the real rule that fires for each event and the matched conditions, so the behaviour is auditable",
+    "that DetectionResult and DetectionEvidence carry no technique field and no ATT&CK id is produced",
+    "the documented gap, so the manifest does not overstate coverage"
+  ],
+  "not_invented": [
+    "no technique ids, tactic ids, or technique names are written here",
+    "no mapping output file is produced",
+    "the known technique ids appear only in this file's prose, never as platform data"
+  ]
+}

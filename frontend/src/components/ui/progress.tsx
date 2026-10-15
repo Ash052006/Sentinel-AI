@@ -4,12 +4,24 @@ import { percent } from '../../lib/formats'
 export function ConfidenceBar({
   value,
   label = 'confidence',
+  absentHint = 'Not produced by the correlation engine',
 }: {
   value: number | null | undefined
   label?: string
+  /** Explains the dash so it cannot be misread as a measured zero. */
+  absentHint?: string
 }) {
   if (value === null || value === undefined) {
-    return <span className="font-mono text-[11px] text-ink-faint">—</span>
+    return (
+      <span
+        className="font-mono text-[11px] text-ink-faint"
+        role="img"
+        aria-label={`${label}: not recorded — ${absentHint}`}
+        title={absentHint}
+      >
+        —
+      </span>
+    )
   }
   const tone =
     value >= 0.7 ? 'bg-low' : value >= 0.4 ? 'bg-medium' : 'bg-high'
@@ -30,9 +42,14 @@ export function ScoreBar({
   value,
   label = 'risk score',
 }: {
-  value: number
+  value: number | null | undefined
   label?: string
 }) {
+  // A score the engine never computed must not be drawn as 0 — an empty bar
+  // reads as "measured and low", which is a different claim than "not recorded".
+  if (value === null || value === undefined) {
+    return <span className="font-mono text-[11px] text-ink-faint">—</span>
+  }
   const tone = value >= 0.75 ? 'bg-critical' : value >= 0.5 ? 'bg-high' : value >= 0.25 ? 'bg-medium' : 'bg-low'
   return (
     <span className="inline-flex items-center gap-2" role="img" aria-label={`${label}: ${percent(value)}`}>

@@ -1,0 +1,83 @@
+{
+  "description": "Threat Attribution Engine (app/services/threat_attribution) inputs. Claims are source-backed signals only; the engine derives hypotheses, confidence and status. The claim_id / correlation_id / detection_id / event_id values are placeholders substituted by the runner with the identities produced by the real pipeline - they are NOT persisted evidence ids. Attribution is a hypothesis, never a fact: nothing here asserts an attacker identity as established.",
+  "policy": "app.services.threat_attribution.policy.DeterministicAttributionStrategy",
+  "min_supporting_signals": 1,
+  "attributed_min_supporting_signals": 2,
+  "scenarios": [
+    {
+      "scenario_id": "attribution_attributed_two_supporting_signals",
+      "purpose": "Two supporting claims for one named candidate reach ATTRIBUTED (>= attributed_min_supporting_signals).",
+      "expected_status": "attributed",
+      "claims": [
+        {
+          "target_type": "infrastructure",
+          "target_identifier": "203.0.113.66",
+          "relationship": "supports",
+          "evidence_type": "network_connection.destination_ip",
+          "provenance": "observed",
+          "reference": "event"
+        },
+        {
+          "target_type": "infrastructure",
+          "target_identifier": "203.0.113.66",
+          "relationship": "supports",
+          "evidence_type": "dns_query.hostname",
+          "provenance": "enriched",
+          "reference": "event"
+        }
+      ]
+    },
+    {
+      "scenario_id": "attribution_partially_supported_one_signal",
+      "purpose": "A single supporting claim produces a hypothesis but only PARTIALLY_SUPPORTED - the engine will not assert an attacker on one signal.",
+      "expected_status": "partially_supported",
+      "claims": [
+        {
+          "target_type": "malware_family",
+          "target_identifier": "demo-loader-stage2",
+          "relationship": "supports",
+          "evidence_type": "detection.rule_metadata",
+          "provenance": "detected",
+          "reference": "detection"
+        }
+      ]
+    },
+    {
+      "scenario_id": "attribution_conflicting_evidence",
+      "purpose": "The same candidate is both supported and contradicted, so the assessment is CONFLICTING rather than ATTRIBUTED.",
+      "expected_status": "conflicting",
+      "claims": [
+        {
+          "target_type": "threat_group",
+          "target_identifier": "demo-cluster-alpha",
+          "relationship": "supports",
+          "evidence_type": "infrastructure_reuse",
+          "provenance": "correlated",
+          "reference": "correlation"
+        },
+        {
+          "target_type": "threat_group",
+          "target_identifier": "demo-cluster-alpha",
+          "relationship": "supports",
+          "evidence_type": "ttp_overlap",
+          "provenance": "detected",
+          "reference": "detection"
+        },
+        {
+          "target_type": "threat_group",
+          "target_identifier": "demo-cluster-alpha",
+          "relationship": "conflicts",
+          "evidence_type": "infrastructure_disjoint",
+          "provenance": "enriched",
+          "reference": "event"
+        }
+      ]
+    },
+    {
+      "scenario_id": "attribution_insufficient_evidence",
+      "purpose": "No claims at all: the engine returns INSUFFICIENT_EVIDENCE and zero hypotheses rather than guessing.",
+      "expected_status": "insufficient_evidence",
+      "claims": []
+    }
+  ]
+}

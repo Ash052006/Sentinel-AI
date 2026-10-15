@@ -307,6 +307,8 @@ class RiskAssessment(BaseModel):
     * ``level`` — controlled categorical risk level.
     * ``confidence`` — how confident SentinelAI is in this assessment,
       bounded to ``[0.0, 1.0]`` and independent of ``score``/``level``.
+      ``None`` records that the source correlation asserted no confidence,
+      which is distinct from a measured ``0.0``.
     * ``factors`` / ``evidence`` — structured, explainable reasons for the
       assessment; optional and defined by the future engine.
     * ``metadata`` — JSON-compatible, secret-free bookkeeping.
@@ -353,14 +355,16 @@ class RiskAssessment(BaseModel):
             "score->level mapping is a future scoring rule."
         ),
     )
-    confidence: float = Field(
+    confidence: float | None = Field(
         ...,
         ge=0.0,
         le=1.0,
         description=(
             "How confident SentinelAI is in this assessment, bounded to "
             "[0.0, 1.0].  Independent of score/level — never derived from "
-            "them, never a risk score."
+            "them, never a risk score.  Null means the source correlation "
+            "asserted no confidence, so none was produced; it does not mean "
+            "zero confidence."
         ),
     )
     factors: list[RiskFactor] = Field(

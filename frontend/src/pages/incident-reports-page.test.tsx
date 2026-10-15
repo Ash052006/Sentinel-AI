@@ -138,6 +138,50 @@ describe('IncidentReportsPage', () => {
     expect(within(row).getByText('Failed generation')).toBeInTheDocument()
   })
 
+  it('renders the exact row shape the demo persists when Gemini is unavailable', async () => {
+    // `python -m app.cli demo --scenario full` without a Gemini key drives the
+    // real report service, which commits one governed `failed` decision row.
+    // These are the literal field values of such a row: no title, no model, no
+    // generated_at, a REPORT_INTERNAL code and a sanitized reason. The page
+    // must show that row rather than falling through to an empty state.
+    vi.mocked(incidentReportsApi.list).mockResolvedValue({
+      items: [
+        makeSummary({
+          report_id: '48261bdc-c950-489a-8557-ee07cde0a8c2',
+          correlation_id: 'e0cda552-b4ea-4c8e-bd7a-a0765c8b4ac3',
+          status: 'failed',
+          title: null,
+          model: null,
+          generated_at: null,
+          error_code: 'REPORT_INTERNAL',
+          error_message:
+            'Gemini API key is required. Set GEMINI_API_KEY in your environment or pass api_key explicitly.',
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      correlation_id: null,
+    })
+    renderWithProviders(<IncidentReportsPage />)
+
+    const row = await screen.findByTestId('incident-report-row')
+    expect(within(row).getByText('FAILED')).toBeInTheDocument()
+    // The row shows the real persisted identifiers, shortened for display.
+    const shown = within(row)
+      .getAllByTestId('mono-id')
+      .map((node) => node.textContent)
+    expect(shown).toContain('48261bdcc950')
+    expect(shown).toContain('e0cda552b4ea')
+    // A failed row carries no narrative, and the page must not invent one.
+    expect(screen.queryByTestId('report-payload')).not.toBeInTheDocument()
+    // The counters must read the persisted row, not an empty feed.
+    const grid = document.querySelector('div.grid.grid-cols-2') as HTMLElement
+    const statTiles = Array.from(grid.children).map((tile) => tile.textContent)
+    expect(statTiles).toContain('Reports1')
+    expect(statTiles).toContain('Failed1')
+  })
+
   it('opens the payload view for a generated report', async () => {
     const user = userEvent.setup()
     const record = makeRecord()

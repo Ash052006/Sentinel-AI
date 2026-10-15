@@ -29,6 +29,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
+from app.agents.investigation.exceptions import InvestigationAgentError
 from app.models.incident_report import IncidentReportRow
 from app.models.user import User
 from app.repositories.incident_report import IncidentReportRepository
@@ -48,6 +49,7 @@ from .errors import (
     IncidentReportError,
     ReportCorrelationNotFoundError,
     ReportNotFoundError,
+    ReportProviderError,
     ReportUnexpectedError,
     sanitize,
 )
@@ -153,7 +155,16 @@ class IncidentReportService:
         marker = _ReportRowMarker(db, self._repository_factory(db))
 
         try:
-            generator = self._generator_factory()
+            # The provider is constructed here, *outside* the generator's own
+            # error mapping.  A construction failure (missing API key, invalid
+            # model configuration) is a provider availability problem, not an
+            # internal defect, so it is translated in the try *body* — allowing
+            # the ReportProviderError handler below to persist a failed row
+            # instead of falling through to REPORT_INTERNAL.
+            try:
+                generator = self._generator_factory()
+            except InvestigationAgentError as exc:
+                raise ReportProviderError(sanitize(str(exc))) from exc
             report = generator.generate(
                 db, actor=actor, correlation_id=correlation_id
             )

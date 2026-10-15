@@ -1,0 +1,8 @@
+{
+  "function": "13_threat_attribution",
+  "kind": "workflow",
+  "service": "app.services.threat_attribution",
+  "persistence": false,
+  "api": false,
+  "limitation": "Library-only: no API route and no persistence table."
+}

@@ -1,0 +1,65 @@
+{
+  "description": "SOAR (app/services/soar) inputs. Playbooks are NOT in this file: they are the fixed, code-owned seed set in app/services/soar/playbooks.py and are synchronised into the database by the real SoarService.sync_seed_playbooks(). Every run below carries a REAL PolicyDecision produced by the real policy engine; the SOAR gate re-verifies it before any provider is contacted. Only the sandbox providers (MockFirewallProvider / MockEDRProvider / MockIdentityProvider) are used - no real firewall, EDR or identity system is contacted.",
+  "playbooks": [
+    "block_ip",
+    "block_domain",
+    "quarantine_file",
+    "disable_account",
+    "terminate_session",
+    "isolate_endpoint",
+    "endpoint_containment"
+  ],
+  "providers": [
+    "firewall",
+    "edr",
+    "identity"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "soar_successful_single_step",
+      "purpose": "A policy-allowed block_ip decision runs the shipped single-step 'block_ip' playbook against the firewall sandbox and reaches status=succeeded.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "playbook_id": "block_ip",
+      "target": "203.0.113.66"
+    },
+    {
+      "scenario_id": "soar_composite_multi_step",
+      "purpose": "A REQUIRES_APPROVAL isolate_endpoint decision, granted by a real ciso approval, drives the composite 'endpoint_containment' playbook end to end: the EDR isolates the endpoint, the firewall blocks the C2 IP and the identity adapter disables the actor account. This is the full policy -> approval -> response -> SOAR chain.",
+      "policy_scenario_id": "policy_isolate_endpoint_allowed_with_attribution",
+      "playbook_id": "endpoint_containment",
+      "target": "ep-7f3a9c21",
+      "approval_grant": true
+    },
+    {
+      "scenario_id": "soar_duplicate_submission",
+      "purpose": "The same decision + playbook + target submitted twice must be suppressed by the durable idempotency key: one execution row, the same execution_id, and the second call returns the persisted execution rather than a second run.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "playbook_id": "block_ip",
+      "target": "203.0.113.66",
+      "repeat": 2
+    },
+    {
+      "scenario_id": "soar_dry_run",
+      "purpose": "A dry run performs no mutation, contacts no provider, and persists nothing; it returns the deterministic simulated projection.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "playbook_id": "block_ip",
+      "target": "203.0.113.66",
+      "dry_run": true
+    },
+    {
+      "scenario_id": "soar_denied_never_executes",
+      "purpose": "A policy-DENIED decision is rejected by the SOAR gate; no provider is invoked and no execution is created.",
+      "policy_scenario_id": "policy_isolate_endpoint_denied_without_attribution",
+      "playbook_id": "isolate_endpoint",
+      "target": "ep-7f3a9c21"
+    },
+    {
+      "scenario_id": "soar_requires_approval_without_grant",
+      "purpose": "A REQUIRES_APPROVAL quarantine_file decision submitted with no approval_id is recorded as status=pending by the real gate: the provider is never called and no containment happens. SOAR never executes on the strength of the policy decision alone.",
+      "policy_scenario_id": "policy_quarantine_file_requires_approval",
+      "playbook_id": "quarantine_file",
+      "target": "9f2a1c7e-4b3d-4a8f-9c21-5e6f70819a2b",
+      "expect_status": "pending"
+    }
+  ]
+}

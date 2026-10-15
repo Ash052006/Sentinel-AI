@@ -87,9 +87,11 @@ WEIGHT_VOLUME = 0.5
 WEIGHT_BREADTH = 0.3
 WEIGHT_DIVERSITY = 0.2
 
-#: Assessment confidence baseline when the correlation asserts no numeric
-#: confidence.  Documented under "Confidence policy" below.
-CONFIDENCE_ABSENT_BASELINE = 0.0
+#: Deprecated: assessment confidence is now propagated as ``None`` when the
+#: correlation asserts none.  Retained as a named constant so existing imports
+#: keep resolving; it must no longer be substituted for a missing measurement,
+#: because ``0.0`` reads as a measured zero rather than an absent one.
+CONFIDENCE_ABSENT_BASELINE = None
 
 #: Risk level thresholds (score -> level), lower-inclusive.
 LEVEL_LOW_MAX = 0.30       # score < 0.30                -> LOW
@@ -157,7 +159,7 @@ def risk_level_for_score(score: float) -> RiskLevel:
 
 def confidence_for_correlation(
     correlation: CorrelationResult,
-) -> float:
+) -> float | None:
     """Project the correlation's confidence onto the assessment.
 
     Confidence is **independent** from the risk score: it is sourced only
@@ -166,13 +168,13 @@ def confidence_for_correlation(
 
     * When the correlation asserts a numeric confidence (``[0, 1]`` by the
       Step 10A contract), it is copied through unchanged.
-    * When the correlation asserts none (``None`` — the Step 10B agent's
-      behaviour), the assessment records a documented baseline of
-      ``CONFIDENCE_ABSENT_BASELINE`` (``0.0``): the engine never invents a
-      confidence number.  This is deterministic and testable.
+    * When the correlation asserts none (``None`` — the correlation engine's
+      behaviour for cardinality clusters), ``None`` is propagated as
+      ``None``.  A previous implementation substituted a documented baseline
+      of ``0.0``, which made an unproduced confidence indistinguishable from a
+      measured "no confidence" by a reader or a downstream API consumer.
+      Absent stays absent; the score and level are unaffected either way.
     """
-    if correlation.confidence is None:
-        return CONFIDENCE_ABSENT_BASELINE
     return correlation.confidence
 
 
@@ -327,9 +329,9 @@ class DeterministicRiskScoringEngine:
 
     **Confidence policy** — independent of the score.  The assessment
     ``confidence`` mirrors ``CorrelationResult.confidence`` when the
-    correlation asserts one, and otherwise records the documented baseline
-    ``CONFIDENCE_ABSENT_BASELINE`` (``0.0``).  It is never derived from the
-    scoring signals, the score, or the level, and it never influences them.
+    correlation asserts one, and is ``None`` when it asserts none.  It is
+    never derived from the scoring signals, the score, or the level, and it
+    never influences them.
 
     **Deliberately not used as scoring signals** (documented in the module
     docstring and the Phase 2 report):

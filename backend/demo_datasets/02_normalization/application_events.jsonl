@@ -1,0 +1,2 @@
+{"timestamp": "2026-09-28T10:13:00+00:00", "source": "okta-sso", "source_type": "identity", "event_type": "login", "action": "user.session.start", "outcome": "success", "actor": "a.saxena@contoso.example", "client_ip_address": "203.0.113.201"}
+{"timestamp": "2026-09-28T10:14:00+00:00", "source": "github-actions", "source_type": "application", "event_type": "deployment", "action": "workflow run completed", "outcome": "success", "actor": "ci-bot@contoso.example", "repository": "contoso/payments"}

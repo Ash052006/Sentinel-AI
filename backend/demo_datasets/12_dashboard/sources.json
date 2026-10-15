@@ -1,0 +1,23 @@
+{
+  "description": "SOC Dashboard (12) input. There is no backend dashboard route and no dashboard table: the page composes existing read APIs client-side. This file therefore declares which REAL datasets must be ingested to make the dashboard meaningful, instead of duplicating event files or hardcoding rows. Ingest 00_full_soc_scenario/attack_chain.jsonl once; the dashboard then derives its state from the persisted detections, correlations, risk assessments, TI indicators, hunts, approvals and SOAR executions this run created.",
+  "primary_dataset": "00_full_soc_scenario/attack_chain.jsonl",
+  "supporting_datasets": [
+    "04_threat_intelligence/indicator_events.jsonl",
+    "07_risk_scoring/low_volume/events.jsonl",
+    "07_risk_scoring/medium_volume/events.jsonl",
+    "07_risk_scoring/high_volume/events.jsonl",
+    "19_threat_hunting/hunts.json",
+    "16_hitl/approval_scenarios.json",
+    "18_soar/scenarios.json"
+  ],
+  "api_surfaces_the_page_reads": [
+    {"path": "/api/detections", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/correlations", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/risk-assessments", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/threat-intelligence/indicators", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/threat-hunts", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/approvals", "method": "GET", "roles": ["admin", "analyst", "ciso"]},
+    {"path": "/api/soar/executions", "method": "GET", "roles": ["admin", "analyst", "ciso"]}
+  ],
+  "note": "Levels, counts and time series are computed in the frontend from these read models. The pack never writes a dashboard row."
+}

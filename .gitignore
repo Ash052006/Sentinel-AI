@@ -26,3 +26,7 @@ dist/
 # Temp / test output
 pytest_output.txt
 *.txt.tmp
+
+# Local demo state: `python -m app.cli demo --clean` snapshots the exact rows a
+# run created, which are machine-specific and must never be committed.
+backend/.demo_state.json

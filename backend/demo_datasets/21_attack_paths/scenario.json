@@ -1,0 +1,12 @@
+{
+  "description": "Attack Path Visualization (app/services/attack_path) input. The graph is built by the real AttackPathGraphBuilder from the persisted correlation, its members, the linked detections, the linked risk assessment, and the threat-intel indicators/lookups that share the correlated event ids. No node, edge, ordering or field is written here.",
+  "builder": "app.services.attack_path.builder.AttackPathGraphBuilder",
+  "route": "GET /api/attack-paths/{correlation_id} (read-only)",
+  "correlation_id": {"resolved_from": "00_full_soc_scenario/attack_chain.jsonl", "placeholder": "<generated_correlation_id>"},
+  "properties": [
+    "Every node and edge is derived from a persisted record; a missing surface degrades the graph and is reported in `limitation`, never silently dropped.",
+    "Nodes and edges are ordered deterministically by (surface priority, node_id) and edge_id.",
+    "The graph is truncated at the real bounds (120 nodes / 240 edges) and `truncated` is set; truncation is never silent.",
+    "Each node/edge carries a source_reference back to the persisted table and row it came from, plus evidence_references where the schema defines them."
+  ]
+}

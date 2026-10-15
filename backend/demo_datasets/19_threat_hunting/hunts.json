@@ -1,0 +1,101 @@
+{
+  "description": "Threat Hunting (app/services/threat_hunting) inputs. A hunt is created as a draft and then run exactly once by the real ThreatHuntService against real persisted data (detections, correlations, risk assessments, TI indicators/lookups, incident memories, audit log). No finding, evidence item or timeline entry is written here - all of them are produced by the hunting engine. Filters are constrained by HUNT_TYPE_FIELDS and FIELD_OPERATORS in app/schemas/threat_hunting.py; an unsupported field/operator pair is rejected at validation, never silently ignored.",
+  "window": {
+    "note": "Hours relative to now at run time; resolved by the runner to timezone-aware instants.",
+    "start_hours_ago": 72,
+    "end_hours_ahead": 1
+  },
+  "hunts": [
+    {
+      "hunt_id": "hunt_detection_review",
+      "name": "DEMO: detection review of the full SOC chain",
+      "hunt_type": "detection_review",
+      "purpose": "Reviews the persisted detections produced by the 00_full_soc_scenario ingest and reports them as governed evidence + findings.",
+      "filters": [
+        {
+          "field": "rule_type",
+          "operator": "equals",
+          "value": "sigma"
+        },
+        {
+          "field": "severity",
+          "operator": "in",
+          "values": [
+            "high",
+            "critical"
+          ]
+        }
+      ]
+    },
+    {
+      "hunt_id": "hunt_indicator",
+      "name": "DEMO: indicator hunt for the delivery host",
+      "hunt_type": "indicator_hunt",
+      "purpose": "Looks up a real persisted threat-intel indicator and its provider lookups.",
+      "filters": [
+        {
+          "field": "indicator_type",
+          "operator": "equals",
+          "value": "ip"
+        },
+        {
+          "field": "indicator_value",
+          "operator": "equals",
+          "target_from": "persisted_indicator_value"
+        }
+      ]
+    },
+    {
+      "hunt_id": "hunt_multi_stage",
+      "name": "DEMO: multi-stage activity for the full SOC correlation",
+      "hunt_type": "multi_stage_activity",
+      "purpose": "Reads the persisted correlation, its members and the correlated risk assessment for the scenario correlation id.",
+      "filters": [
+        {
+          "field": "correlation_id",
+          "operator": "equals",
+          "target_from": "persisted_correlation_id"
+        }
+      ]
+    },
+    {
+      "hunt_id": "hunt_privilege_activity",
+      "name": "DEMO: privilege activity review",
+      "hunt_type": "privilege_activity",
+      "purpose": "Second detection-surface template, adding the risk_level field, to show the filter/field allowlist differs per hunt type.",
+      "filters": [
+        {
+          "field": "rule_type",
+          "operator": "equals",
+          "value": "sigma"
+        },
+        {
+          "field": "risk_level",
+          "operator": "in",
+          "values": [
+            "high",
+            "critical"
+          ]
+        }
+      ]
+    }
+  ],
+  "lifecycle": [
+    {
+      "step": "create",
+      "note": "ThreatHuntService.create -> status=draft"
+    },
+    {
+      "step": "run",
+      "note": "ThreatHuntService.run -> status=completed; single-shot, a completed hunt cannot be re-run"
+    },
+    {
+      "step": "read",
+      "note": "list_evidence / list_findings / list_timeline -> deterministic paged read models"
+    },
+    {
+      "step": "cancel",
+      "note": "ThreatHuntService.cancel on a non-terminal draft -> status=cancelled, audited"
+    }
+  ]
+}

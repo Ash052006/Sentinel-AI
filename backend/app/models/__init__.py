@@ -1,3 +1,11 @@
+from app.models.digital_twin import (
+    DigitalTwinEnvironment,
+    SimulatedAsset,
+    EnvironmentSnapshot,
+    ScenarioDefinition,
+    SimulationRun,
+    SimulatedActionOutcome,
+)
 from app.models.role import Role
 from app.models.user import User
 from app.models.audit_log import AuditLog
@@ -18,6 +26,26 @@ from app.models.soar_playbook import SoarPlaybookRow
 from app.models.soar_playbook_version import SoarPlaybookVersionRow
 from app.models.soar_execution import SoarExecutionRow
 from app.models.soar_step_execution import SoarStepExecutionRow
+from app.models.knowledge_graph import KnowledgeGraphEdge, KnowledgeGraphNode
+from app.models.debate import (
+    DebateAgentAssessmentRecord,
+    DebateArgumentRecord,
+    DebateConsensusRecord,
+    DebateRoundRecord,
+    DebateSessionRecord,
+)
+from app.models.attack_prediction import (
+    AttackPredictionEvidenceRecord,
+    AttackPredictionRecord,
+    AttackPredictionSessionRecord,
+    AttackPredictionUncertaintyRecord,
+)
+from app.models.playbook import (
+    PlaybookActionEvidenceRecord,
+    PlaybookActionRecord,
+    PlaybookSessionRecord,
+    PlaybookStepRecord,
+)
 from app.models.threat_hunt import (
     ThreatHuntEvidenceRow,
     ThreatHuntFindingRow,
@@ -27,6 +55,10 @@ from app.models.threat_hunt import (
 
 __all__ = [
     "Role",
+    "AttackPredictionEvidenceRecord",
+    "AttackPredictionRecord",
+    "AttackPredictionSessionRecord",
+    "AttackPredictionUncertaintyRecord",
     "User",
     "AuditLog",
     "ThreatIntelIndicator",
@@ -45,7 +77,15 @@ __all__ = [
     "SoarExecutionRow",
     "SoarStepExecutionRow",
     "ThreatHuntRow",
+    "KnowledgeGraphNode",
+    "KnowledgeGraphEdge",
     "ThreatHuntEvidenceRow",
     "ThreatHuntFindingRow",
     "ThreatHuntTimelineItemRow",
+    "DigitalTwinEnvironment",
+    "SimulatedAsset",
+    "EnvironmentSnapshot",
+    "ScenarioDefinition",
+    "SimulationRun",
+    "SimulatedActionOutcome",
 ]

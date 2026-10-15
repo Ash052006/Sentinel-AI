@@ -246,7 +246,7 @@ class TestRealEngineThroughRoute:
 
             @property
             def model_name(self) -> str | None:
-                return "gemini-2.0-flash"
+                return "gemini-3.8-flash"
 
             def parse(self, user_query: str) -> SOCParseResult:
                 import json
@@ -256,7 +256,7 @@ class TestRealEngineThroughRoute:
                         {"resource": "detections", "operation": "recent", "limit": 2}
                     ),
                     provider="gemini",
-                    model="gemini-2.0-flash",
+                    model="gemini-3.8-flash",
                 )
 
         def recent(db, *, limit=50):
@@ -303,7 +303,7 @@ class TestRealEngineThroughRoute:
         assert data["intent"]["resource"] == "detections"
         assert data["intent"]["operation"] == "recent"
         assert data["metadata"]["parser_provider"] == "gemini"
-        assert data["metadata"]["parser_model"] == "gemini-2.0-flash"
+        assert data["metadata"]["parser_model"] == "gemini-3.8-flash"
         assert data["semantics"] == ["detection_results"]
         assert data["items"] == [
             {"id": "d1", "level": None, "memory_type": None},
@@ -314,7 +314,7 @@ class TestRealEngineThroughRoute:
         services_time = datetime.fromisoformat(data["metadata"]["recorded_at"])
         assert services_time.tzinfo is not None
 
-    def test_unconfigured_gemini_returns_503_not_500(
+    def test_unconfigured_groq_returns_503_not_500(
         self,
         client: TestClient,
         admin_token: str,
@@ -322,7 +322,7 @@ class TestRealEngineThroughRoute:
     ) -> None:
         from app.core.config import settings
 
-        monkeypatch.setattr(settings, "gemini_api_key", "")
+        monkeypatch.setattr(settings, "groq_api_key", "")
         monkeypatch.setattr(soc_routes, "_soc", None)
         resp = client.post(
             "/api/soc/query",

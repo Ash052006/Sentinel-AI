@@ -39,6 +39,35 @@ from app.models.threat_hunt import (
     ThreatHuntTimelineItemRow,
 )
 from app.models.incident_report import IncidentReportRow
+from app.models.knowledge_graph import KnowledgeGraphEdge, KnowledgeGraphNode
+from app.models.debate import (
+    DebateAgentAssessmentRecord,
+    DebateArgumentRecord,
+    DebateConsensusRecord,
+    DebateRoundRecord,
+    DebateSessionRecord,
+)
+from app.models.attack_prediction import (
+    AttackPredictionEvidenceRecord,
+    AttackPredictionRecord,
+    AttackPredictionSessionRecord,
+    AttackPredictionUncertaintyRecord,
+)
+from app.models.playbook import (
+    PlaybookActionEvidenceRecord,
+    PlaybookActionRecord,
+    PlaybookSessionRecord,
+    PlaybookStepRecord,
+)
+
+from app.models.digital_twin import (
+    DigitalTwinEnvironment,
+    SimulatedAsset,
+    EnvironmentSnapshot,
+    ScenarioDefinition,
+    SimulationRun,
+    SimulatedActionOutcome,
+)
 
 
 config = context.config
@@ -50,7 +79,11 @@ config.set_main_option(
 )
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # ``disable_existing_loggers`` defaults to True, which silently switches off
+    # every already-created ``app.*`` logger when migrations run inside a live
+    # process (tests, the CLI, the API). Alembic only needs to set up its own
+    # handlers, so existing application loggers must be left alone.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

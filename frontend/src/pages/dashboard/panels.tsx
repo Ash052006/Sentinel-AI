@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bar,
   BarChart,
@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 import { BookKey, ShieldAlert } from 'lucide-react'
-import { Panel, Separator } from '../../components/ui/card'
+import { Panel, Separator, Stat } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import {
@@ -26,6 +26,12 @@ import { EmptyState, ErrorState, LoadingRows } from '../../components/states'
 import { TBody, Td, Th, TRow, Table, MonoCell } from '../../components/ui/table'
 import { formatDateTime } from '../../lib/formats'
 import { approvalsApi } from '../../api/approvals'
+import { threatIntelligenceApi } from '../../api/threat-intelligence'
+import {
+  indicatorLookupStatusMeta,
+  indicatorTypeLabel,
+  indicatorTypeTone,
+} from '../../lib/labels'
 import { useAuthStore } from '../../store/auth'
 import {
   BUCKET_MS,
@@ -526,7 +532,7 @@ export function IncidentsPanel({
 
   return (
     <Panel
-      title="Active incidents"
+      title="Incidents · risk + correlation join"
       subtitle="Correlation + risk assessments from bounded feeds (limit 200 each) · click a row to inspect"
       className={cn('xl:col-span-8', className)}
       padded={false}
@@ -777,47 +783,114 @@ export function RecentCorrelationsPanel({
   )
 }
 
+/** Bounded feed size for the dashboard's threat-intelligence summary. */
+const DASHBOARD_TI_PAGE_SIZE = 6
+
 // ---------------------------------------------------------------------------
-// Threat intelligence — honest empty state; V1 has no TI read API.
+// Threat intelligence — real indicator summary from the Step 8A read API.
+//
+// This panel previously reported "no V1 read API" because no such API
+// existed.  It now reads the real one, so it must distinguish the four
+// honest states rather than collapsing them into a good/bad binary:
+// provider returned data, provider had no record, provider failed, and no
+// lookup exists.  It never renders a verdict — Step 8A persists none.
 // ---------------------------------------------------------------------------
 
-export function ThreatIntelPanel({
-  memoryFeed,
-  memoryIndicators,
-  loading,
-  hasError,
-  className,
-}: {
-  memoryFeed: Array<{ indicators: Array<unknown> }>
-  memoryIndicators: number
-  loading: boolean
-  hasError: boolean
-  className?: string
-}) {
+export function ThreatIntelPanel({ className }: { className?: string }) {
+  const indicators = useQuery({
+    queryKey: ['threat-intelligence', 'indicators', 1, DASHBOARD_TI_PAGE_SIZE],
+    queryFn: () => threatIntelligenceApi.listIndicators(1, DASHBOARD_TI_PAGE_SIZE),
+  })
+
+  const rows = useMemo(() => indicators.data?.items ?? [], [indicators.data])
+  const total = indicators.data?.total ?? 0
+  const lookups = useMemo(
+    () => rows.reduce((sum, row) => sum + row.lookup_count, 0),
+    [rows],
+  )
+  const failures = useMemo(
+    () => rows.reduce((sum, row) => sum + row.error_count, 0),
+    [rows],
+  )
+  const enriched = useMemo(
+    () => rows.filter((row) => row.status === 'enriched').length,
+    [rows],
+  )
+
   return (
     <Panel
       title="Threat intelligence"
-      subtitle="Provider layer exists · no V1 read API"
+      subtitle={
+        total > 0
+          ? `Step 8A indicators · bounded to ${DASHBOARD_TI_PAGE_SIZE}`
+          : 'Step 8A indicators'
+      }
       className={cn('xl:col-span-4', className)}
       padded={false}
     >
-      {loading ? (
+      {indicators.isLoading ? (
         <LoadingRows rows={5} />
-      ) : hasError ? (
-        <ErrorState message="Incident memory data is unavailable." />
-      ) : (
-        <div data-testid="ti-empty" className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+      ) : indicators.isError ? (
+        <ErrorState
+          message="Threat-intelligence indicator data is unavailable."
+          onRetry={() => void indicators.refetch()}
+        />
+      ) : total === 0 ? (
+        <div
+          data-testid="ti-empty"
+          className="flex flex-col items-center gap-2 px-4 py-10 text-center"
+        >
           <BookKey className="h-6 w-6 text-ink-faint" aria-hidden="true" />
-          <div className="text-sm font-medium text-ink-dim">No threat-intelligence indicators</div>
+          <div className="text-sm font-medium text-ink-dim">
+            No threat-intelligence indicators
+          </div>
           <div className="max-w-md text-[11px] leading-relaxed text-ink-faint">
-            V1 exposes no threat-intelligence indicator API. {memoryFeed.length}{' '}
-            {memoryFeed.length === 1 ? 'incident memory' : 'incident memories'} loaded by the
-            bounded feed record {memoryIndicators} indicator
-            {memoryIndicators === 1 ? '' : 's'}. Nothing is fabricated here.
+            The read surface is live but no indicator has been persisted yet. Indicators
+            are created by the Threat Intelligence Agent when it extracts one from a
+            normalized security event. Nothing is fabricated here.
           </div>
-          <div className="text-[10px] text-ink-faint">
-            Step 8 threat-intelligence contracts exist but persist and serve no indicators.
+        </div>
+      ) : (
+        <div className="space-y-3 p-4" data-testid="ti-summary">
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="Indicators" value={total} />
+            <Stat label="Lookups" value={lookups} tone="text-accent" />
+            <Stat
+              label="Provider failures"
+              value={failures}
+              tone={failures > 0 ? 'text-critical' : undefined}
+            />
+            <Stat label="Enriched" value={enriched} tone="text-low" />
           </div>
+          <div className="space-y-1">
+            {rows.slice(0, 6).map((row) => {
+              const meta = indicatorLookupStatusMeta[row.status]
+              return (
+                <div
+                  key={row.indicator_id}
+                  className="flex items-center gap-2 text-[11px]"
+                  data-testid="ti-summary-row"
+                >
+                  <Badge tone={indicatorTypeTone[row.indicator_type]}>
+                    {indicatorTypeLabel[row.indicator_type]}
+                  </Badge>
+                  <span className="min-w-0 flex-1 truncate font-mono text-ink">
+                    {row.value}
+                  </span>
+                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                </div>
+              )
+            })}
+          </div>
+          {total > rows.length && (
+            <p className="text-[10px] text-ink-faint">
+              Bounded feed · showing {rows.length} of {total} indicators
+            </p>
+          )}
+          <p className="text-[10px] text-ink-faint">
+            Provider outcomes only. Step 8A persists no verdict, severity, or risk, so
+            none is shown.
+          </p>
         </div>
       )}
     </Panel>

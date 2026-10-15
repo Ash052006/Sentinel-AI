@@ -26,8 +26,10 @@ fail closed);
 :func:`assert_candidate_secret_free` — fail-closed credential-shaped
 content scan over the serialized candidate.
 
-The concrete :class:`~app.services.soc.gemini.GeminiSOCIntentParser`
-adapts the existing Gemini provider for SOC through this abstraction.
+The concrete :class:`~app.services.soc.groq.GroqSOCIntentParser` adapts the
+existing Groq provider for SOC through this abstraction.  The Gemini adapter
+(:class:`~app.services.soc.gemini.GeminiSOCIntentParser`) is retained for
+other SOC provider integrations but is no longer the engine default.
 """
 
 from __future__ import annotations

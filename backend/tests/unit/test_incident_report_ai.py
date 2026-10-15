@@ -98,7 +98,7 @@ class TestGeminiClientPayload:
         )
         client = IncidentReportGeminiClient(
             api_key="k",
-            model="gemini-2.0-flash",
+            model="gemini-3.8-flash",
             temperature=0.0,
             max_retries=0,
             http_client=httpx.Client(),

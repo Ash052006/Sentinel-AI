@@ -1,0 +1,38 @@
+{
+  "pack": "sentinelai-demo-datasets",
+  "verified_at": "2026-09-29T07:30:40.172982+00:00",
+  "outcome": "pass",
+  "frozen_sample_sha256": "d4b95a63fa2c303cd56c7a33be3ff1735299066991d4e02a2d237ce0d389db50",
+  "checks": [
+    {
+      "check": "manifest_file_set",
+      "status": "ok",
+      "note": "the manifest and the pack agree on 39 authoring file(s)"
+    },
+    {
+      "check": "manifest_hashes",
+      "status": "ok",
+      "note": "every recorded sha256 and byte count matches the current files"
+    },
+    {
+      "check": "source_contract",
+      "status": "ok",
+      "note": "every JSON/JSONL file parses and satisfies the required fields (['event_type', 'source', 'source_type', 'timestamp'])"
+    },
+    {
+      "check": "no_placeholders",
+      "status": "ok",
+      "note": "no placeholder drafting text appears in any authoring file"
+    },
+    {
+      "check": "frozen_sample",
+      "status": "ok",
+      "note": "sample_events.jsonl is byte-identical to the recorded checksum"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Explainable AI (11) input. There is no standalone explainability service, route or table: an explanation in SentinelAI is the provenance chain carried on the records themselves. This file declares the chain that must be walkable after the full SOC scenario runs. Every id is a placeholder substituted at run time with the identity the real pipeline actually minted - no evidence id is fabricated here.",
+  "chain": [
+    {"step": 1, "layer": "event", "source": "00_full_soc_scenario/attack_chain.jsonl", "placeholder": "<collected_event_id>", "provenance": "observed", "note": "FileLogCollector assigns the event id and preserves the raw record verbatim in raw_data."},
+    {"step": 2, "layer": "normalized_event", "source": "NormalizationAgent", "placeholder": "<collected_event_id>", "provenance": "observed", "note": "Same event_id is carried through; normalization never changes provenance."},
+    {"step": 3, "layer": "detection", "source": "DetectionAgent", "placeholder": "<generated_detection_id>", "provenance": "detected", "note": "DetectionEvidence.matched_fields / matched_conditions name the exact normalized fields and Sigma conditions that matched."},
+    {"step": 4, "layer": "correlation", "source": "CorrelationAgent", "placeholder": "<generated_correlation_id>", "provenance": "correlated", "note": "CorrelationResult.evidence names the signal (shared_event_id) and the member count."},
+    {"step": 5, "layer": "risk_assessment", "source": "DeterministicRiskScoringEngine", "placeholder": "<generated_risk_assessment_id>", "provenance": "risk_assessed", "note": "The three factors (member_volume, event_breadth, detection_diversity) each carry per-item RiskEvidence naming the member/detection they came from."},
+    {"step": 6, "layer": "investigation_context", "source": "InvestigationContextBuilder", "placeholder": "<deterministic_evidence_id>", "provenance": "observed|detected|correlated|risk_assessed", "note": "Evidence ids are UUIDv5 values derived from the context namespace, so the same context always yields the same ids."},
+    {"step": 7, "layer": "investigation_finding", "source": "InvestigationAgent (Gemini)", "placeholder": "<model_referenced_evidence_id>", "provenance": "ai_generated", "note": "A finding may only cite evidence ids that exist in the context. A dangling or invented id rejects the entire model output."}
+  ],
+  "invariants": [
+    "Provenance is pinned per layer and cannot be reused by another layer.",
+    "A finding's confidence is the model's own; it is never derived from the risk score or detection severity.",
+    "Recalled incident memory is history, never current observed evidence."
+  ]
+}

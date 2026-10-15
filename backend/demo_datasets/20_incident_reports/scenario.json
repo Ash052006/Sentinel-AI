@@ -1,0 +1,15 @@
+{
+  "description": "Incident Report Generator (app/services/reporting) input. This file contains NO report text. The real ReportContextBuilder reads the persisted correlation, detections, risk assessment, threat-intel indicators/lookups, incident memories, overlapping threat hunts, approvals and SOAR executions for a correlation id resolved at run time, and only then does the real generator call the LLM. Every citation the model returns is validated against the built record catalog: a dangling citation rejects the whole output.",
+  "service": "app.services.reporting.service.IncidentReportService.generate",
+  "context_builder": "app.services.reporting.context.ReportContextBuilder",
+  "correlation_id": {"resolved_from": "00_full_soc_scenario/attack_chain.jsonl", "placeholder": "<generated_correlation_id>"},
+  "expected_availability_markers": {
+    "note": "The builder distinguishes these itself; the dataset never sets them.",
+    "NOT_PROVIDED": "an input the caller supplied no data source for (e.g. security_events, which SentinelAI does not persist)",
+    "NONE_FOUND": "the retrieval ran successfully but nothing was cited for that input (e.g. no overlapping hunt, no approval, no SOAR execution)"
+  },
+  "record_types_the_context_may_contain": [
+    "correlation", "detection", "risk_assessment", "threat_intel_indicator",
+    "threat_intel_lookup", "incident_memory", "threat_hunt", "approval", "soar_execution", "event_reference"
+  ]
+}

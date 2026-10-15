@@ -3,23 +3,31 @@ import { useQuery } from '@tanstack/react-query'
 import { detectionsApi } from '../api/detections'
 import { PageHeader, Panel } from '../components/ui/card'
 import { EmptyState, ErrorState, LoadingRows } from '../components/states'
-import { RuleTypeBadge, SeverityBadge } from '../components/badges'
+import { ProvenanceBadge, RuleTypeBadge, SeverityBadge } from '../components/badges'
 import { MonoId } from '../components/ui/mono-id'
 import { ConfidenceBar } from '../components/ui/progress'
-import { JsonViewer } from '../components/ui/json-viewer'
 import { Select } from '../components/ui/input'
 import { formatTimestamp } from '../lib/formats'
 import { MonoCell, Td, Th, TRow, Table } from '../components/ui/table'
+import { DetectionDetail } from '../components/detection-detail'
 import type { DetectionSeverity, RuleType } from '../types/api'
 
 export function DetectionsPage() {
   const [limit, setLimit] = useState(100)
   const [severity, setSeverity] = useState<'all' | DetectionSeverity>('all')
   const [ruleType, setRuleType] = useState<'all' | RuleType>('all')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const detections = useQuery({
     queryKey: ['detections', 'recent', limit],
     queryFn: () => detectionsApi.recent(limit),
+  })
+
+  const selected = useQuery({
+    queryKey: ['detections', 'get', selectedId],
+    queryFn: () => detectionsApi.get(selectedId as string),
+    enabled: selectedId !== null,
+    retry: false,
   })
 
   const rows = useMemo(() => {
@@ -68,7 +76,36 @@ export function DetectionsPage() {
             </option>
           ))}
         </Select>
+        {selectedId && (
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            className="text-[11px] text-accent hover:underline"
+          >
+            close detail
+          </button>
+        )}
       </PageHeader>
+
+      {selectedId && (
+        <Panel
+          title="Detection detail"
+          subtitle="Served by GET /api/detections/{detection_id}"
+        >
+          {selected.isLoading ? (
+            <LoadingRows rows={3} />
+          ) : selected.isError ? (
+            <ErrorState
+              message={String(selected.error)}
+              onRetry={() => selected.refetch()}
+            />
+          ) : selected.data ? (
+            <DetectionDetail detection={selected.data} />
+          ) : (
+            <EmptyState title="Detection not found" />
+          )}
+        </Panel>
+      )}
 
       <Panel padded={false}>
         {detections.isLoading ? (
@@ -88,7 +125,9 @@ export function DetectionsPage() {
                 <Th>Rule</Th>
                 <Th>Engine</Th>
                 <Th>Confidence</Th>
+                <Th>Provenance</Th>
                 <Th>Detected at</Th>
+                <Th>Event</Th>
                 <Th>Detection id</Th>
                 <Th />
               </tr>
@@ -108,19 +147,24 @@ export function DetectionsPage() {
                   <Td>
                     <ConfidenceBar value={item.confidence} />
                   </Td>
+                  <Td>
+                    <ProvenanceBadge provenance={item.provenance} />
+                  </Td>
                   <Td className="text-xs text-ink-dim">{formatTimestamp(item.detected_at)}</Td>
+                  <MonoCell>
+                    <MonoId id={item.event_id} />
+                  </MonoCell>
                   <MonoCell>
                     <MonoId id={item.detection_id} />
                   </MonoCell>
                   <Td>
-                    <details className="group">
-                      <summary className="cursor-pointer select-none text-[11px] text-accent hover:underline">
-                        evidence
-                      </summary>
-                      <div className="mt-2">
-                        <JsonViewer value={item.evidence} />
-                      </div>
-                    </details>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(item.detection_id)}
+                      className="cursor-pointer select-none text-[11px] text-accent hover:underline"
+                    >
+                      detail
+                    </button>
                   </Td>
                 </TRow>
               ))}

@@ -1,0 +1,24 @@
+{
+  "function": "10_response",
+  "kind": "workflow",
+  "schema": "app.schemas.response.ResponseRequest",
+  "required_fields": [
+    "response_id",
+    "policy_decision_id",
+    "correlation_id",
+    "action_type",
+    "target"
+  ],
+  "action_enum": [
+    "BLOCK_IP",
+    "BLOCK_DOMAIN",
+    "QUARANTINE_FILE",
+    "DISABLE_ACCOUNT",
+    "TERMINATE_SESSION",
+    "ISOLATE_ENDPOINT"
+  ],
+  "provider_registry": "app.services.response.registry (mock provider available)",
+  "persistence": false,
+  "api": false,
+  "limitation": "Library-only: no API route and no persistence table."
+}

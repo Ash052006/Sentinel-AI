@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.agents.investigation.exceptions import InvestigationConfigurationError
 from app.models.audit_log import AuditLog
 from app.models.incident_report import IncidentReportRow
 from app.schemas.incident_report import ReportStatus
@@ -139,6 +140,35 @@ class TestFailedRowPersistence:
         assert rows[0].payload is None
         assert rows[0].error_code == "REPORT_PROVIDER_UNAVAILABLE"
         assert rows[0].error_message  # sanitized
+        assert len(_audit_actions(db, "incident_report.generated_failed")) == 1
+
+    def test_provider_construction_config_error_is_not_labelled_internal(
+        self, db: Session
+    ):
+        """A provider that cannot even be constructed is a provider problem.
+
+        Previously this escaped the generator's own mapping (the factory runs
+        before ``generate``) and was mislabelled REPORT_INTERNAL, implying a
+        code bug rather than a missing API key / bad model configuration.
+        """
+        a_correlation(db, correlation_id=CORR)
+        actor = seed_actor(db)
+
+        def unconstructible():
+            raise InvestigationConfigurationError(
+                "gemini api key is not configured"
+            )
+
+        service = IncidentReportService(generator_factory=unconstructible)
+
+        with pytest.raises(ReportProviderError):
+            service.generate(db, actor=actor, correlation_id=CORR)
+
+        row = _rows(db)[0]
+        assert row.status == ReportStatus.FAILED.value
+        assert row.error_code == "REPORT_PROVIDER_UNAVAILABLE"
+        assert "not configured" in row.error_message
+        assert row.payload is None
         assert len(_audit_actions(db, "incident_report.generated_failed")) == 1
 
     def test_unexpected_internal_error_maps_to_internal(self, db: Session):

@@ -586,11 +586,15 @@ class RiskContext(BaseModel):
         ...,
         description="Risk level, preserved verbatim (never re-derived).",
     )
-    confidence: float = Field(
+    confidence: float | None = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Assessment confidence in [0.0, 1.0], preserved verbatim.",
+        description=(
+            "Assessment confidence in [0.0, 1.0], preserved verbatim.  Null "
+            "records that the source correlation asserted no confidence, so "
+            "none was produced; it is never a fabricated zero."
+        ),
     )
     factors: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -1945,11 +1949,14 @@ class InvestigationContextBuilder:
             level=risk_assessment.level,
             confidence=risk_assessment.confidence,
             factors=[
-                _json_clone(factor.model_dump())
+                # ``mode="json"`` is required, not cosmetic: real risk
+                # evidence carries UUID detection_id/event_id members, and
+                # ``_json_clone`` is a json.dumps round trip.
+                _json_clone(factor.model_dump(mode="json"))
                 for factor in risk_assessment.factors
             ],
             evidence=[
-                _json_clone(item.model_dump())
+                _json_clone(item.model_dump(mode="json"))
                 for item in risk_assessment.evidence
             ],
             timestamp=risk_assessment.timestamp,

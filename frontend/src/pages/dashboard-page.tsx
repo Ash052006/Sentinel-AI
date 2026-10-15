@@ -87,12 +87,7 @@ export function DashboardPage() {
         }}
       />
 
-      <ThreatIntelPanel
-        memoryFeed={data.memoryFeed}
-        memoryIndicators={data.memoryIndicators}
-        loading={data.memories.isLoading}
-        hasError={data.memories.isError}
-      />
+      <ThreatIntelPanel />
 
       <RecentDetectionsPanel
         detectionFeed={data.detectionFeed}

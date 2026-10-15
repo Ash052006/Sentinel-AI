@@ -1676,3 +1676,70 @@ class TestErrorContraction:
     def test_standard_value_error_catch_works(self):
         with pytest.raises(ValueError):
             _build(detections=[_detection_input()] * (MAX_DETECTIONS + 1))
+
+# ---------------------------------------------------------------------------
+# 14. UUID-carrying risk factors/evidence (regression)
+# ---------------------------------------------------------------------------
+
+
+class TestUuidBearingRiskSerialization:
+    """Risk factors and evidence may carry real UUID detection/event refs.
+
+    A real ``RiskAssessment`` carries ``detection_id``/``event_id`` and the
+    assessment/correlation ids as ``uuid.UUID`` objects.  The builder clones
+    factors and evidence with ``json.dumps`` semantics, so it must serialize
+    them in JSON mode.  A plain ``model_dump()`` keeps the UUIDs as objects
+    and the clone crashes with "Object of type UUID is not JSON serializable"
+    -- the shipped bug this test guards.
+    """
+
+    def test_factors_and_evidence_with_uuid_refs_round_trip(self):
+        factor = RiskFactor(
+            factor_type="detection_volume",
+            contribution=0.42,
+            evidence=[
+                RiskEvidence(
+                    observation_type="detection_severity",
+                    detection_id=_DETECTION_1,
+                    event_id=_EVENT_1,
+                )
+            ],
+        )
+        evidence = RiskEvidence(
+            observation_type="assessment",
+            detection_id=_DETECTION_2,
+            event_id=_EVENT_2,
+        )
+        ctx = _build(
+            risk_assessment=_risk(factors=[factor], evidence=[evidence])
+        )
+
+        dumped = ctx.model_dump(mode="json")
+        assert dumped["investigation_id"] == str(_INVESTIGATION_ID)
+        factor_dumped = dumped["risk_assessment"]["factors"][0]
+        assert factor_dumped["evidence"][0]["detection_id"] == str(_DETECTION_1)
+        assert factor_dumped["evidence"][0]["event_id"] == str(_EVENT_1)
+
+        reparsed = json.loads(ctx.model_dump_json())
+        saved_factor = reparsed["risk_assessment"]["factors"][0]
+        assert saved_factor["evidence"][0]["detection_id"] == str(_DETECTION_1)
+        assert saved_factor["evidence"][0]["event_id"] == str(_EVENT_1)
+        assert reparsed["risk_assessment"]["correlation_id"] == str(_CORRELATION_ID)
+        assert reparsed["risk_assessment"]["risk_assessment_id"] == str(_RISK_ID)
+
+    def test_schema_allowed_uuid_metadata_survives_the_clone(self):
+        embedded = str(uuid.UUID("dddddddd-2222-4e4f-9a1d-223344556677"))
+        factor = RiskFactor(
+            factor_type="correlation_attribution",
+            contribution=0.5,
+            evidence=[
+                RiskEvidence(
+                    observation_type="correlation_reference",
+                    metadata={"correlation_id": embedded},
+                )
+            ],
+        )
+        carried = _build(
+            risk_assessment=_risk(factors=[factor])
+        ).risk_assessment.factors[0]["evidence"][0]["metadata"]["correlation_id"]
+        assert carried == embedded

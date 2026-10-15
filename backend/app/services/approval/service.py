@@ -139,13 +139,20 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 def _to_record(row: ApprovalRequestRow) -> ApprovalRecord:
     """Convert a persisted row into its approved-path read record."""
-    decision = PolicyDecision.model_validate(row.decision)
+    decision = (
+        PolicyDecision.model_validate(row.decision)
+        if row.decision is not None
+        else None
+    )
     return ApprovalRecord(
+        decision=decision,
         id=row.id,
         approval_id=row.approval_id,
         policy_decision_id=row.policy_decision_id,
         correlation_id=row.correlation_id,
-        action_type=ResponseActionType(decision.requested_action),
+        action_type=ResponseActionType(
+            decision.requested_action if decision is not None else row.action_type
+        ),
         target=row.target,
         status=ApprovalStatus(row.status),
         reason=row.reason,

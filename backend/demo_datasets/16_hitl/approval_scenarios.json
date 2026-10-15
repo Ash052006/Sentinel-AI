@@ -1,0 +1,81 @@
+{
+  "description": "Human-in-the-Loop (app/services/approval) inputs. An approval request is only routable from a REAL PolicyDecision whose status is REQUIRES_APPROVAL; the action and target are read from that decision and are never supplied by the client. The service recomputes policy_decision_id from the decision content and rejects a self-inconsistent submission. Four-eyes control is enforced: the requester cannot resolve their own request. RBAC is enforced by the API layer (admin / analyst / ciso).",
+  "ttl": "app.schemas.approval.APPROVAL_PENDING_TTL = 24 hours (lazy expiry, evaluated on read)",
+  "statuses": [
+    "pending",
+    "approved",
+    "rejected",
+    "expired",
+    "cancelled"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "hitl_pending",
+      "purpose": "Approval identity is content-derived, so every scenario below uses a distinct quarantined file id to obtain a distinct real request. A quarantine_file REQUIRES_APPROVAL decision is submitted and remains pending until a different authorised user acts.",
+      "policy_scenario_id": "policy_quarantine_file_requires_approval",
+      "expected_status": "pending",
+      "target": "9f2a1c7e-4b3d-4a8f-9c21-5e6f70819a2b",
+      "action_type": "quarantine_file"
+    },
+    {
+      "scenario_id": "hitl_approved",
+      "purpose": "Approval identity is content-derived, so every scenario below uses a distinct quarantined file id to obtain a distinct real request. A second, higher-privileged user approves; the approval hands the grant to the real Response layer, which records response_status/response_provider/response_error_code on the approval row. A successful approval records response_status and the provider call id on the same approval row: approving authorises the action, the response layer then records what actually happened. A successful approval records response_status and the provider call id on the same approval row: approving authorises the action, the response layer then records what actually happened.",
+      "policy_scenario_id": "policy_quarantine_file_requires_approval_critical_confidence",
+      "resolve": "approve",
+      "comment": "Confirmed malicious stage-2 loader quarantined on WIN-DC01; approved for the demo incident.",
+      "target": "9f2a1c7e-4b3d-4a8f-9c21-5e6f70819a2b",
+      "action_type": "quarantine_file"
+    },
+    {
+      "scenario_id": "hitl_rejected",
+      "purpose": "Approval identity is content-derived, so every scenario below uses a distinct quarantined file id to obtain a distinct real request. A different authorised user rejects; a rejection must never execute a response (response_status stays unset). Terminal: the approval never executes anything, so response_status stays unset.",
+      "policy_scenario_id": "policy_block_ip_requires_approval_above_high",
+      "resolve": "reject",
+      "comment": "File is a false positive; rejecting the quarantine action.",
+      "target": "203.0.113.66",
+      "action_type": "block_ip"
+    },
+    {
+      "scenario_id": "hitl_cancelled",
+      "purpose": "Dual control applies to withdrawal as well: the analyst who raised the request may not cancel it. A different authorised user (the ciso) withdraws it, which is terminal and never executes a response.",
+      "policy_scenario_id": "policy_quarantine_file_requires_approval_above_confidence_floor",
+      "resolve": "cancel_by_approver",
+      "comment": "Withdrawn - investigating an alternative containment first.",
+      "target": "9f2a1c7e-4b3d-4a8f-9c21-5e6f70819a2b",
+      "action_type": "quarantine_file"
+    },
+    {
+      "scenario_id": "hitl_four_eyes_blocked",
+      "purpose": "Approval identity is content-derived, so every scenario below uses a distinct quarantined file id to obtain a distinct real request. The same user who requested approval tries to approve it. The service must refuse with a dual-control error and the request must stay pending.",
+      "policy_scenario_id": "policy_isolate_endpoint_requires_approval_with_attribution",
+      "resolve": "approve_as_requester",
+      "comment": "Attempting self-approval to demonstrate the four-eyes control.",
+      "target": "ep-7f3a9c21",
+      "action_type": "isolate_endpoint"
+    },
+    {
+      "scenario_id": "hitl_expired",
+      "purpose": "A request created with a clock two hours in the past outlives the app.schemas.approval.APPROVAL_PENDING_TTL = 24 hours (lazy expiry, evaluated on read) TTL. The lazy-expiry reconciliation pass retires it with no user action at all, and an expired request can never be approved.",
+      "policy_scenario_id": "policy_isolate_endpoint_allowed_with_attribution",
+      "expected_status": "expired",
+      "force_expired": true,
+      "target": "ep-7f3a9c21",
+      "action_type": "isolate_endpoint"
+    }
+  ],
+  "rbac_roles": {
+    "request": [
+      "admin",
+      "analyst"
+    ],
+    "resolve": [
+      "admin",
+      "ciso"
+    ],
+    "read": [
+      "admin",
+      "analyst",
+      "ciso"
+    ]
+  }
+}

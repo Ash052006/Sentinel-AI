@@ -768,10 +768,23 @@ class TestReadOnlyContract:
         assert _count(db_session, CorrelationMemberRow) == before_members
 
     def test_no_mutation_endpoints_exist(self, client: TestClient) -> None:
+        """The correlations API itself exposes no write verbs.
+
+        Scoped to this router's own paths. A bare ``"correlation" in path``
+        substring also matches unrelated routes that merely accept a
+        correlation id -- notably ``POST /api/debates/{correlation_id}``, which
+        creates a debate (a different resource) and never writes a correlation.
+        Asserting on the whole spec would therefore flag a route that does not
+        touch this resource at all, and would quietly stop guarding anything if
+        the naming changed.
+        """
         spec = client.get("/openapi.json").json()
+        checked = 0
         for path in spec["paths"]:
-            if "correlation" in path:
+            if path.startswith("/api/correlations"):
                 assert set(spec["paths"][path]) == {"get"}, path
+                checked += 1
+        assert checked, "expected at least one /api/correlations path"
 
     def test_no_write_methods_accepted(
         self, client: TestClient, admin_token: str

@@ -22,6 +22,7 @@ from app.services.soc.errors import (  # noqa: F401
 )
 from app.services.soc.executor import SOCQueryExecutor  # noqa: F401
 from app.services.soc.engine import SOCQueryService  # noqa: F401
+from app.services.soc.groq import GroqSOCIntentParser  # noqa: F401
 from app.services.soc.parser import (  # noqa: F401
     SOCIntentParser,
     SOCParseResult,
@@ -33,6 +34,7 @@ from app.services.soc.parser import (  # noqa: F401
 __all__ = [
     "SOCQueryService",
     "SOCQueryExecutor",
+    "GroqSOCIntentParser",
     "SOCIntentParser",
     "SOCParseResult",
     "build_candidate",

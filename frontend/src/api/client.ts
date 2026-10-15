@@ -13,6 +13,29 @@ export class ApiError extends Error {
 }
 
 /**
+ * Extracts a human-readable reason from an error body.
+ *
+ * FastAPI puts the exception payload under `detail`, so a governed failure
+ * arrives one level deeper as an object carrying its own human-readable
+ * `detail` (V3.23 debate, V3.24 prediction). Those bodies exist precisely so the
+ * UI can explain *why* something failed; flattening them to a bare status code
+ * would throw that away. The failure code is folded into the message so the
+ * governed code stays visible even when the detail is generic.
+ */
+function errorMessage(detail: unknown, status: number): string {
+  if (typeof detail === 'string' && detail.length > 0) return detail
+  if (detail && typeof detail === 'object') {
+    const failure = detail as { detail?: unknown; failure_code?: unknown }
+    if (typeof failure.detail === 'string' && failure.detail.length > 0) {
+      return typeof failure.failure_code === 'string'
+        ? `${failure.detail} (${failure.failure_code})`
+        : failure.detail
+    }
+  }
+  return `Request failed (${status})`
+}
+
+/**
  * Fired on any 401 so the shell can route the user back to /login.
  * Dispatch is side-effect free and safe to fire repeatedly.
  */
@@ -40,7 +63,7 @@ async function request<T>(
   headers.set('Accept', 'application/json')
   const token = tokenStore.get()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  if (init?.body) {
+  if (init?.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -59,11 +82,7 @@ async function request<T>(
     } catch {
       /* non-JSON error body */
     }
-    const message =
-      typeof detail === 'string' && detail.length > 0
-        ? detail
-        : `Request failed (${response.status})`
-    throw new ApiError(response.status, message)
+    throw new ApiError(response.status, errorMessage(detail, response.status))
   }
 
   if (response.status === 204) {
@@ -92,4 +111,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /**
+   * POST multipart/form-data. The browser sets the multipart boundary, so
+   * no Content-Type header is sent from here.
+   */
+  upload: <T>(path: string, form: FormData): Promise<T> =>
+    request<T>(path, { method: 'POST', body: form }),
 }

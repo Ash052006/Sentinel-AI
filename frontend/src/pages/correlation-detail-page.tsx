@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Network } from 'lucide-react'
+import { ChevronLeft, MessagesSquare, Network, Share2 } from 'lucide-react'
 import { correlationsApi } from '../api/correlations'
 import { risksApi } from '../api/risks'
 import { memoriesApi } from '../api/memories'
@@ -13,6 +13,7 @@ import { JsonViewer } from '../components/ui/json-viewer'
 import { Button } from '../components/ui/button'
 import { formatTimestamp, shortId } from '../lib/formats'
 import { MonoCell, Td, Th, TRow, Table } from '../components/ui/table'
+import { MemberGroupingNote } from '../components/member-grouping-note'
 
 export function CorrelationDetailPage() {
   const { correlationId = '' } = useParams()
@@ -59,6 +60,18 @@ export function CorrelationDetailPage() {
         }
         description={`Established ${formatTimestamp(core.timestamp)} · provenance ${core.provenance}.`}
       >
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/knowledge-graph/${core.correlation_id}`}>
+            <Share2 className="h-3.5 w-3.5" />
+            Knowledge graph
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/debates/correlation/${core.correlation_id}`}>
+            <MessagesSquare className="h-3.5 w-3.5" />
+            Run agent debate
+          </Link>
+        </Button>
         <Button asChild variant="outline" size="sm">
           <Link to={`/attack-paths/${core.correlation_id}`}>
             <Network className="h-3.5 w-3.5" />
@@ -127,7 +140,8 @@ export function CorrelationDetailPage() {
 
         <div className="space-y-4">
           <Panel title="Members" subtitle="Persisted members in member_order" padded={false}>
-            <Table>
+            <MemberGroupingNote members={core.members} />
+            <Table data-testid="members-table">
               <thead>
                 <tr className="border-b border-edge">
                   <Th>Order</Th>
@@ -157,7 +171,10 @@ export function CorrelationDetailPage() {
             {memories.isLoading ? (
               <LoadingRows rows={3} />
             ) : (memories.data?.items ?? []).length === 0 ? (
-              <EmptyState title="No recalled memory" />
+              <EmptyState
+                title="No recalled memory"
+                body="No persisted memory cites this correlation yet. Recall is served by GET /api/incident-memories/correlation/{id}, which only matches memories whose correlation_id points at this incident."
+              />
             ) : (
               <ul className="space-y-3">
                 {(memories.data?.items ?? []).map((memory) => (

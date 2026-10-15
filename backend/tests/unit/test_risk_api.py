@@ -128,7 +128,7 @@ def _assessment(
     risk_assessment_id: uuid.UUID | None = None,
     score: float = 0.625,
     level: RiskLevel = RiskLevel.HIGH,
-    confidence: float = 0.8,
+    confidence: float | None = 0.8,
     factors: list[RiskFactor] | None = None,
     evidence: list[RiskEvidence] | None = None,
     metadata: dict | None = None,
@@ -684,6 +684,48 @@ class TestPaginationValidation:
 
 
 class TestRecentRiskAssessments:
+    def test_absent_confidence_is_served_as_null_not_an_error(
+        self, client: TestClient, db_session: Session, admin_token: str
+    ) -> None:
+        """A correlation with no confidence must be readable, as ``null``.
+
+        The engine used to substitute a ``0.0`` baseline to satisfy a
+        non-nullable schema, which reported an unproduced measurement as a
+        measured zero.  Now that confidence propagates as ``None``, the read
+        model must pass it through: serving ``null`` rather than failing the
+        whole bounded feed with a 500.
+        """
+        newest = db_session.scalar(select(func.max(RiskAssessmentRow.timestamp)))
+        marker_ts = (
+            newest + timedelta(seconds=1) if newest is not None else _ts(20_000)
+        )
+        cid = uuid.uuid4()
+        # score/level are still fully produced; only confidence is absent.
+        marker = _assessment(
+            cid, score=0.9, level=RiskLevel.HIGH, confidence=None,
+            timestamp=marker_ts,
+        )
+        _persist(db_session, [marker], [_parent(cid, timestamp=marker_ts)])
+
+        try:
+            response = client.get(
+                "/api/risk-assessments/recent?limit=10",
+                headers=auth_header(admin_token),
+            )
+            # The whole feed must still be served.
+            assert response.status_code == 200
+            item = next(
+                i
+                for i in response.json()
+                if i["risk_assessment_id"] == str(marker.risk_assessment_id)
+            )
+            assert item["confidence"] is None
+            # The rest of the assessment is unaffected by the absent value.
+            assert item["score"] == 0.9
+            assert item["level"] == RiskLevel.HIGH.value
+        finally:
+            _cleanup(db_session, cid)
+
     def test_recent_returns_results(
         self, client: TestClient, db_session: Session, admin_token: str
     ) -> None:

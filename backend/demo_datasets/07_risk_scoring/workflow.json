@@ -1,0 +1,28 @@
+{
+  "function": "07_risk_scoring",
+  "kind": "workflow",
+  "services": [
+    "app.agents.correlation.CorrelationAgent",
+    "app.services.risk.engine.DeterministicRiskScoringEngine"
+  ],
+  "entry_point": "DeterministicRiskScoringEngine.score(correlation, *, timestamp)",
+  "signals": [
+    "member_count (volume)",
+    "event_breadth",
+    "signal_diversity"
+  ],
+  "level_thresholds": {
+    "low": "<0.30",
+    "medium": "<0.55",
+    "high": "<0.75",
+    "critical": ">=0.75"
+  },
+  "command": "python scripts/run_demo_dataset.py correlation demo_datasets/05_correlation/focused_event.jsonl",
+  "observed": {
+    "member_count": 7,
+    "distinct_events": 1,
+    "score": 0.628571,
+    "level": "high"
+  },
+  "limitation": "event_breadth is computed over DISTINCT event_id values. Because the only correlation strategy groups by event_id, breadth is structurally capped at 1 for every multi-member correlation, so multi-member risk is driven by volume and diversity alone."
+}

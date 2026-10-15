@@ -233,10 +233,10 @@ class TestBuildCandidate:
 
     def test_parse_result_slots(self) -> None:
         result = SOCParseResult(
-            raw_text="{}", provider="gemini", model="gemini-2.0-flash"
+            raw_text="{}", provider="gemini", model="gemini-3.8-flash"
         )
         assert result.provider == "gemini"
-        assert result.model == "gemini-2.0-flash"
+        assert result.model == "gemini-3.8-flash"
         with pytest.raises(AttributeError):
             result.anything_else = 1  # type: ignore[attr-defined]
 

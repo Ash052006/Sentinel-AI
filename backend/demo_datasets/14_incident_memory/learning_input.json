@@ -1,0 +1,58 @@
+{
+  "description": "Second prior incident. Together with historical_incident.json it forms the persisted corpus that the real IncidentMemoryLearningService (app.services.incident_memory_learning) consolidates. Nothing here is a learned pattern: occurrence counts, first/last occurrence and confidence are produced by the learning service. Two memories sharing the technique_code 'temp-directory-execution' and the action_type 'block_ip' are what make recurring_technique / recurring_action groups reachable.",
+  "schema": "app.services.incident_memory.input.IncidentMemoryInput",
+  "min_occurrences": 2,
+  "title": "DEMO-2026-08-29 file-server webshell staging",
+  "summary": "Previously closed incident: a webshell was staged on a file server and the associated outbound IP was blocked the same way as the earlier incident.",
+  "confidence": 0.64,
+  "sources": [
+    {
+      "source_id": "8f1a0c22-0101-4a10-9a01-0d0e0f101111",
+      "provenance": "correlated",
+      "label": "prior file-server correlation",
+      "metadata": {"demo_dataset": "14_incident_memory/learning_input.json"}
+    }
+  ],
+  "indicators": [
+    {
+      "indicator_id": "8f1a0c22-0111-4a10-9a01-0d0e0f101111",
+      "indicator_type": "ip",
+      "value": "198.51.100.23",
+      "metadata": {"note": "same egress host seen in both prior incidents"}
+    }
+  ],
+  "entities": [
+    {
+      "entity_id": "8f1a0c22-0121-4a10-9a01-0d0e0f101111",
+      "entity_type": "host",
+      "identifier": "FILE-SRV-07.contoso.example",
+      "metadata": {"role": "affected host"}
+    }
+  ],
+  "techniques": [
+    {
+      "technique_id": "8f1a0c22-0131-4a10-9a01-0d0e0f101111",
+      "technique_code": "temp-directory-execution",
+      "metadata": {"note": "author-defined technique label, not a MITRE id"}
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "8f1a0c22-0141-4a10-9a01-0d0e0f101111",
+      "finding_type": "persistence",
+      "title": "Webshell staged under the web root and reached from outside",
+      "confidence": 0.71
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "8f1a0c22-0151-4a10-9a01-0d0e0f101111",
+      "action_type": "block_ip",
+      "metadata": {"target": "198.51.100.23", "provider": "mock"}
+    }
+  ],
+  "outcome": {
+    "outcome_status": "contained",
+    "metadata": {"note": "webshell removed; egress block reused"}
+  }
+}

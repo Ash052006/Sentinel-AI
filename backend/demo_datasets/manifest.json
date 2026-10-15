@@ -1,0 +1,498 @@
+{
+  "pack": "sentinelai-demo-datasets",
+  "version": "2.0.0",
+  "generated_at": "2026-09-29T07:30:03.553133+00:00",
+  "root": "backend/demo_datasets",
+  "runner": "backend/scripts/run_demo_dataset.py",
+  "frozen_sample_file": {
+    "path": "backend/sample_events.jsonl",
+    "modified": false,
+    "sha256": "d4b95a63fa2c303cd56c7a33be3ff1735299066991d4e02a2d237ce0d389db50",
+    "note": "Frozen input; the pack never modifies it. Regeneration does not touch it."
+  },
+  "cli": {
+    "list": "python scripts/run_demo_dataset.py list",
+    "verify": "python scripts/run_demo_dataset.py verify",
+    "all": "python scripts/run_demo_dataset.py all",
+    "full_soc": "python scripts/run_demo_dataset.py full_soc"
+  },
+  "authoring_contract": {
+    "jsonl_required_fields": [
+      "timestamp",
+      "source",
+      "source_type",
+      "event_type"
+    ],
+    "jsonl_optional_fields": [
+      "actor",
+      "action",
+      "outcome",
+      "event_category",
+      "normalized_data"
+    ],
+    "source_prefix_selects_mapping": {
+      "windows": "NewProcessName / CommandLine / ParentProcessName / ProcessId / TargetUserName / Status / LogonType",
+      "linux": "process_name, command_line, parent_process, exe",
+      "firewall": "src_ip, dst_ip, dst_port, action",
+      "_note": "_SOURCE_MAPPINGS is keyed by source NAME with longest-prefix matching."
+    },
+    "timestamps": "ISO-8601 with explicit timezone offset",
+    "yara": "requires real bytes in normalized_data.file_content"
+  },
+  "observed_results": {
+    "full_soc_ingest": {
+      "events": 10,
+      "detections": 9,
+      "correlations": 3,
+      "risk_assessments": 3
+    },
+    "primary_correlation": {
+      "members": 7,
+      "risk_score": 0.628571,
+      "risk_level": "high"
+    },
+    "investigation_context": {
+      "evidence": 11,
+      "risk_factors": 3,
+      "evidence_types": [
+        "correlation_result",
+        "detection_result",
+        "risk_assessment"
+      ]
+    },
+    "natural_language_soc": {
+      "detections_recent": 20,
+      "correlations_recent": 20,
+      "risk_by_correlation": 1,
+      "incident_memories_by_correlation": 0,
+      "detections_by_rule": 22
+    },
+    "hitl": [
+      "pending",
+      "approved+executed",
+      "rejected",
+      "cancelled",
+      "four-eyes block",
+      "expired"
+    ],
+    "detection_as_code": [
+      "validate",
+      "release",
+      "deploy",
+      "evaluate",
+      "version bump",
+      "rollback"
+    ],
+    "soar": {
+      "single_step": "succeeded",
+      "multi_step": "3/3 succeeded",
+      "duplicate": "same_execution_id",
+      "dry_run": "no provider invoked",
+      "denied": "POLICY_DENIED",
+      "no_grant": "APPROVAL_NOT_GIVEN pending"
+    },
+    "threat_hunting": {
+      "detection_review": "102 evidence / 15 findings / 102 timeline",
+      "indicator": "15 evidence / 2 findings",
+      "multi_stage": "9 evidence / 2 findings",
+      "privilege": "196 evidence / 25 findings",
+      "cancel": "cancelled",
+      "rerun": "refused"
+    },
+    "incident_report_context": {
+      "catalog_entries": 16,
+      "timeline_items": 16,
+      "detections": 7
+    },
+    "attack_paths": {
+      "nodes": 9,
+      "edges": 8,
+      "node_types": [
+        "correlation",
+        "detection",
+        "risk"
+      ]
+    }
+  },
+  "known_gaps": [
+    "06_mitre_mapping: SentinelAI V2 has no ATT&CK technique mapper; the command reports the capability gap honestly.",
+    "Correlation groups by identical event_id only; multi-event chains do not correlate.",
+    "Risk event_breadth is structurally capped at 1 for multi-member correlations (lower than the goal of 3).",
+    "JSONL YARA ingestion is unreachable because no shipped source mapping forwards file content; YARA matches only explicit targets (evaluate_target).",
+    "Investigation/report/NL-SOC answers require a GEMINI_API_KEY; without one the runner skips and never fabricates.",
+    "Threat-intelligence lookups require the real provider keys in .env; failures are captured, never fabricated.",
+    "IncidentMemoryLearningService() ships with a broken default factory; the runner passes the correct repository-factory."
+  ],
+  "functions": [
+    {
+      "id": "log_collection",
+      "directory": "01_log_collection",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "01_log_collection/application_events.jsonl",
+          "bytes": 590,
+          "sha256": "5b0371b713bbe71d792dacf8f3460f990488718b166754aa6b537e1cc29bc3a3"
+        },
+        {
+          "file": "01_log_collection/firewall_events.jsonl",
+          "bytes": 1274,
+          "sha256": "e68ac0caf026499fefac614f66db9054d9a1b47e71baf56f77eceb0842f33a04"
+        },
+        {
+          "file": "01_log_collection/linux_events.jsonl",
+          "bytes": 408,
+          "sha256": "67cb5f3418fe44a72e361a48a413697b12dbe0c1177cdc5ba81f4b76d8138de4"
+        },
+        {
+          "file": "01_log_collection/malformed_lines.jsonl",
+          "bytes": 1216,
+          "sha256": "0d7fa0f03606878494c69c80b3bfaad467a76b42797f2170e906159dd0c0ec57"
+        },
+        {
+          "file": "01_log_collection/windows_events.jsonl",
+          "bytes": 2486,
+          "sha256": "24ff401394173f563b4793a4d9683e4608e70f686c7d1c3a597442d9986623bb"
+        }
+      ],
+      "readme": "01_log_collection/README.md"
+    },
+    {
+      "id": "normalization",
+      "directory": "02_normalization",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "02_normalization/application_events.jsonl",
+          "bytes": 500,
+          "sha256": "547cc2db5cd11a60d6556a6cea7aa44d040384efb239359d47304fd5aa5a7cd2"
+        },
+        {
+          "file": "02_normalization/explicit_overrides.jsonl",
+          "bytes": 548,
+          "sha256": "1d8597a6586de961b50b7d10a675007539a91faafd99dfd520afd483fd36a7b5"
+        },
+        {
+          "file": "02_normalization/firewall_fields.jsonl",
+          "bytes": 594,
+          "sha256": "167025e58dfe432030e8bcb8402734e473f5ceed308b4807266f51437e55da37"
+        },
+        {
+          "file": "02_normalization/linux_snake_case.jsonl",
+          "bytes": 408,
+          "sha256": "67cb5f3418fe44a72e361a48a413697b12dbe0c1177cdc5ba81f4b76d8138de4"
+        },
+        {
+          "file": "02_normalization/unknown_events.jsonl",
+          "bytes": 770,
+          "sha256": "a3250d01fb4ce4e0923d8cc21f015aef7000c8cb77bee0fb69db9e96f977237d"
+        },
+        {
+          "file": "02_normalization/windows_native_fields.jsonl",
+          "bytes": 1767,
+          "sha256": "a780e4da54d7cf1618b3ce64c1d97571d083a77b648ef5ecfdb1ae3d8f4d2432"
+        }
+      ],
+      "readme": "02_normalization/README.md"
+    },
+    {
+      "id": "detection",
+      "directory": "03_detection",
+      "kind": "dataset",
+      "files": [],
+      "readme": "03_detection/README.md"
+    },
+    {
+      "id": "threat_intelligence",
+      "directory": "04_threat_intelligence",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "04_threat_intelligence/indicator_events.jsonl",
+          "bytes": 893,
+          "sha256": "5e07e14c1b9c0f8b09aa087013397ec0b2e44f7b14cbd996c845c4e9b742018c"
+        },
+        {
+          "file": "04_threat_intelligence/no_data_indicators.jsonl",
+          "bytes": 851,
+          "sha256": "8cab2df57511443965f479990f1bdfb7483a29d2fb0d9c6ba26fe32b3c94a4e4"
+        }
+      ],
+      "readme": "04_threat_intelligence/README.md"
+    },
+    {
+      "id": "mitre_mapping",
+      "directory": "06_mitre_mapping",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "06_mitre_mapping/capability.json",
+          "bytes": 1874,
+          "sha256": "c337d3e6b54a6c673f29728e587459b1753ef5d31eacb1c701436110fb9cd09f"
+        },
+        {
+          "file": "06_mitre_mapping/events.jsonl",
+          "bytes": 1485,
+          "sha256": "0a15ffa494e5568502d646cc81c4d00b365dc03daefaaeb34c351fec4da52cc0"
+        }
+      ],
+      "readme": "06_mitre_mapping/README.md"
+    },
+    {
+      "id": "correlation",
+      "directory": "05_correlation",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "05_correlation/focused_event.jsonl",
+          "bytes": 767,
+          "sha256": "6b4dae86d07221d482cc6dd22be6a7d199cec9950b3f1d5a1bd86d37774f4aed"
+        },
+        {
+          "file": "05_correlation/multi_event_same_host.jsonl",
+          "bytes": 1088,
+          "sha256": "fee90a06b47ade073740e3a76380f6f8999cbb1441c2bb75964a3535465769a8"
+        },
+        {
+          "file": "05_correlation/multi_rule_event.jsonl",
+          "bytes": 738,
+          "sha256": "69d44149046c7bcca7742c9c545999d8039e2be77f877a3fe227ffd685b897bc"
+        },
+        {
+          "file": "05_correlation/workflow.json",
+          "bytes": 1500,
+          "sha256": "6fb79cd76ec98a1d48f19652f5cdf38c03b52326030f47c7bb4c0ab5f6b416f5"
+        }
+      ],
+      "readme": "05_correlation/README.md"
+    },
+    {
+      "id": "risk_scoring",
+      "directory": "07_risk_scoring",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "07_risk_scoring/workflow.json",
+          "bytes": 976,
+          "sha256": "2de8fc4022c670c4a06a58e68ba9c2ec4c13f0cedf762efbaa317cb04ca2c33a"
+        }
+      ],
+      "readme": "07_risk_scoring/README.md"
+    },
+    {
+      "id": "investigation",
+      "directory": "08_investigation",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "08_investigation/scenario.json",
+          "bytes": 1757,
+          "sha256": "ee66557f899cee2136e62e152d29438009be987c8e180c50f515c4e8d0d38ac2"
+        }
+      ],
+      "readme": "08_investigation/README.md"
+    },
+    {
+      "id": "policy",
+      "directory": "09_policy",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "09_policy/scenarios.json",
+          "bytes": 7596,
+          "sha256": "84ea327b4add9e2861cbd040e17f64f4bca534fd2a81c1c96be3ba024e311c43"
+        },
+        {
+          "file": "09_policy/workflow.json",
+          "bytes": 543,
+          "sha256": "60a54eff9be4cc580afc769b9697ec515e1d55ced5671b76bcb29a813d889e00"
+        }
+      ],
+      "readme": "09_policy/README.md"
+    },
+    {
+      "id": "response",
+      "directory": "10_response",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "10_response/scenarios.json",
+          "bytes": 2373,
+          "sha256": "7e4f80713e6db8d4a96c123f3f5b6616855782685d5c2e0d6880a0279f5c41c2"
+        },
+        {
+          "file": "10_response/workflow.json",
+          "bytes": 582,
+          "sha256": "ba3cd88ac1efdc5241b8e85da3e7959f38d88bf1abe43281b7d1fb36ac1063e7"
+        }
+      ],
+      "readme": "10_response/README.md"
+    },
+    {
+      "id": "explainability",
+      "directory": "11_explainability",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "11_explainability/evidence_chain.json",
+          "bytes": 2676,
+          "sha256": "cb9c1a065dd2155a8b09c79eff50a9f5cec2a37d126abab2269355e5a8e0d012"
+        }
+      ],
+      "readme": "11_explainability/README.md"
+    },
+    {
+      "id": "dashboard",
+      "directory": "12_dashboard",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "12_dashboard/sources.json",
+          "bytes": 1767,
+          "sha256": "e9e9692d02909ef63fba09614c311a0a3f3570b71a394c982d4b659b2605e80b"
+        }
+      ],
+      "readme": "12_dashboard/README.md"
+    },
+    {
+      "id": "attribution",
+      "directory": "13_attribution",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "13_attribution/claims.json",
+          "bytes": 3410,
+          "sha256": "d7cc864fbde76b7775059441a0217c81916c7d69f06394e26cbc257b8e3c42d2"
+        },
+        {
+          "file": "13_attribution/workflow.json",
+          "bytes": 224,
+          "sha256": "668e664831cfea67740bcefefd1ed066f7a1c871694bb735f9b8198439329f5a"
+        }
+      ],
+      "readme": "13_attribution/README.md"
+    },
+    {
+      "id": "incident_memory",
+      "directory": "14_incident_memory",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "14_incident_memory/historical_incident.json",
+          "bytes": 3579,
+          "sha256": "2d8488fb6542659dc03841980011f41d3857578de150efe343df1d3a618371b4"
+        },
+        {
+          "file": "14_incident_memory/learning_input.json",
+          "bytes": 2321,
+          "sha256": "bf163181f906d41db3e2ec2eefddc7cae0624d987fb8edf08dc24f30e0bcdd15"
+        }
+      ],
+      "readme": "14_incident_memory/README.md"
+    },
+    {
+      "id": "natural_language_soc",
+      "directory": "15_natural_language_soc",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "15_natural_language_soc/queries.json",
+          "bytes": 5121,
+          "sha256": "cc16fc11a75918bba166cf362edb318a9b6b56876cd8a3f23f92c038cecff9c7"
+        }
+      ],
+      "readme": "15_natural_language_soc/README.md"
+    },
+    {
+      "id": "hitl",
+      "directory": "16_hitl",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "16_hitl/approval_scenarios.json",
+          "bytes": 4966,
+          "sha256": "abc3fc75550fb22acef65a882fcaf622144f5ab646caef31d28268ebba1f833e"
+        }
+      ],
+      "readme": "16_hitl/README.md"
+    },
+    {
+      "id": "detection_as_code",
+      "directory": "17_detection_as_code",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "17_detection_as_code/lifecycle_scenarios.json",
+          "bytes": 2329,
+          "sha256": "800be326fbe99941a8fec3c69b6d4b362b98b9270f416fb6e2c35c09c5ff2422"
+        }
+      ],
+      "readme": "17_detection_as_code/README.md"
+    },
+    {
+      "id": "soar",
+      "directory": "18_soar",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "18_soar/scenarios.json",
+          "bytes": 3416,
+          "sha256": "ee6a127be6664e0da16d54d23ad9e2e6a38cb31553a9f9cdbc0b4539b730b985"
+        }
+      ],
+      "readme": "18_soar/README.md"
+    },
+    {
+      "id": "threat_hunting",
+      "directory": "19_threat_hunting",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "19_threat_hunting/hunts.json",
+          "bytes": 3464,
+          "sha256": "984675470fdc56415a6677244887231c667b36f22ef14c3a8a4449369cb0f4d4"
+        }
+      ],
+      "readme": "19_threat_hunting/README.md"
+    },
+    {
+      "id": "incident_reports",
+      "directory": "20_incident_reports",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "20_incident_reports/scenario.json",
+          "bytes": 1455,
+          "sha256": "920c024a637ed1d582dfb182bf11d0aff19d21d0a47d47c6f21cffc9f465eaf8"
+        }
+      ],
+      "readme": "20_incident_reports/README.md"
+    },
+    {
+      "id": "attack_paths",
+      "directory": "21_attack_paths",
+      "kind": "dataset",
+      "files": [
+        {
+          "file": "21_attack_paths/scenario.json",
+          "bytes": 1180,
+          "sha256": "dea3387b6be567fdcd93feb4b54721f5ab01398faccb24b7e3dbaded56bf6fa9"
+        }
+      ],
+      "readme": "21_attack_paths/README.md"
+    },
+    {
+      "id": "full_soc",
+      "directory": "00_full_soc_scenario",
+      "kind": "scenario",
+      "files": [
+        {
+          "file": "00_full_soc_scenario/attack_chain.jsonl",
+          "bytes": 3956,
+          "sha256": "a042e4335350fb7b7212e5e03a5280bec5b29fc8e4b6fda496c6faee2591ce09"
+        }
+      ],
+      "readme": "00_full_soc_scenario/README.md"
+    }
+  ]
+}

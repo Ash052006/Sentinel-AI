@@ -431,15 +431,36 @@ class TestConfidence:
         )
         assert assessment.confidence == 1.0
 
-    def test_confidence_absent_baseline(self):
-        # 21. correlation without confidence -> documented baseline (0.0)
+    def test_confidence_absent_stays_absent(self):
+        # 21. correlation without confidence -> confidence stays None.  A
+        # previous implementation substituted a 0.0 baseline, which made an
+        # unproduced measurement indistinguishable from a measured zero.
         assessment = RiskScoringAgent().analyze(
             _correlation(confidence=None), clock=_FIXED_TS
         )
-        assert assessment.confidence == CONFIDENCE_ABSENT_BASELINE
+        assert assessment.confidence is None
         assert confidence_for_correlation(
             _correlation(confidence=None)
-        ) == CONFIDENCE_ABSENT_BASELINE
+        ) is None
+        # The deprecated constant resolves to None so it can never reintroduce
+        # a fabricated zero in place of a missing measurement.
+        assert CONFIDENCE_ABSENT_BASELINE is None
+
+    def test_absent_confidence_does_not_change_score_or_level(self):
+        # The score/level are computed from cardinality signals only, so a
+        # missing confidence must leave them untouched.
+        without = RiskScoringAgent().analyze(
+            _correlation(confidence=None), clock=_FIXED_TS
+        )
+        # A measured 0.0 changes nothing about the score but must not be what
+        # is recorded for a correlation that asserted nothing.
+        with_zero = RiskScoringAgent().analyze(
+            _correlation(confidence=0.0), clock=_FIXED_TS
+        )
+        assert without.score == with_zero.score
+        assert without.level == with_zero.level
+        assert without.confidence is None
+        assert with_zero.confidence == 0.0
 
     def test_confidence_deterministic(self):
         # 22. same inputs -> same confidence

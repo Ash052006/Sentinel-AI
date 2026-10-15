@@ -15,11 +15,14 @@ import {
   SeverityBadge,
 } from '../components/badges'
 import { MonoId } from '../components/ui/mono-id'
+import { MemberGroupingNote } from '../components/member-grouping-note'
 import { ConfidenceBar, ScoreBar } from '../components/ui/progress'
 import { JsonViewer } from '../components/ui/json-viewer'
 import { Button } from '../components/ui/button'
 import { formatTimestamp, shortId } from '../lib/formats'
 import { MonoCell, Td, Th, TRow, Table } from '../components/ui/table'
+import { DetectionDetail } from '../components/detection-detail'
+import type { CorrelationMember } from '../types/api'
 
 export function IncidentDetailPage() {
   const { correlationId = '' } = useParams()
@@ -53,6 +56,19 @@ export function IncidentDetailPage() {
 
   const core = correlation.data
   const riskAssessments = risks.data?.items ?? []
+
+  // Distinct event IDs with the members that reference them. The engine groups
+  // by event ID, so one event is legitimately referenced by many members;
+  // listing it once per member made one event look like several.
+  const groupedEvents = Array.from(
+    (core?.members ?? []).reduce((acc, member) => {
+      if (!member.event_id) return acc
+      const bucket = acc.get(member.event_id) ?? []
+      bucket.push(member)
+      acc.set(member.event_id, bucket)
+      return acc
+    }, new Map<string, CorrelationMember[]>()),
+  )
 
   if (correlation.isLoading) {
     return <LoadingRows rows={8} />
@@ -97,12 +113,13 @@ export function IncidentDetailPage() {
               label="Event references"
               body="Persisted source events that fed this correlation. V1 exposes no standalone event API; event ids are displayed as recorded on each member."
             >
+              <MemberGroupingNote members={core.members} className="mt-2 rounded border border-edge-soft" />
               <ul className="mt-2 space-y-1">
-                {core.members.map((member) => (
-                  <li key={member.id} className="flex items-center gap-2">
-                    <MonoId id={member.event_id} />
+                {groupedEvents.map(([eventId, refs]) => (
+                  <li key={eventId} className="flex items-center gap-2">
+                    <MonoId id={eventId} />
                     <span className="text-[11px] text-ink-faint">
-                      {formatTimestamp(member.timestamp)}
+                      referenced by {refs.length} detection{refs.length === 1 ? '' : 's'}
                     </span>
                   </li>
                 ))}
@@ -153,6 +170,23 @@ export function IncidentDetailPage() {
                   )}
                 </tbody>
               </Table>
+              <div className="mt-3 space-y-3">
+                {memberDetections.map((detection) =>
+                  detection.isSuccess && detection.data ? (
+                    <details key={`detail-${detection.data.id}`} className="rounded-md border border-edge-soft">
+                      <summary className="cursor-pointer select-none px-3 py-2 text-[11px] text-accent hover:underline">
+                        evidence and provenance for{' '}
+                        <span className="font-mono text-ink-dim">
+                          {detection.data.detection_id}
+                        </span>
+                      </summary>
+                      <div className="border-t border-edge-soft p-3">
+                        <DetectionDetail detection={detection.data} />
+                      </div>
+                    </details>
+                  ) : null,
+                )}
+              </div>
             </ChainStep>
 
             <ChainStep
@@ -173,6 +207,15 @@ export function IncidentDetailPage() {
                   <div className="mt-1">
                     <ConfidenceBar value={core.confidence} />
                   </div>
+                  {core.confidence === null || core.confidence === undefined ? (
+                    <p
+                      data-testid="correlation-confidence-absent"
+                      className="mt-1 text-[11px] text-ink-faint"
+                    >
+                      Not produced by the correlation engine — the dash is a missing measurement,
+                      not a confidence of zero.
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-3">

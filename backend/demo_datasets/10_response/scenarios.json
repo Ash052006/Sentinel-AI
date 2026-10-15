@@ -1,0 +1,43 @@
+{
+  "description": "Response & Mitigation (app/services/response) inputs. The runner first asks the real PolicyDecisionEngine to allow each response, then feeds that decision into the real ResponseExecutor with the shipped MockResponseProvider ('mock'). Nothing is written to a real firewall, EDR, identity system, host, process or file. No execution_status, response_id, provider or message is recorded here.",
+  "provider": "mock",
+  "provider_module": "app.services.response.providers.MOCK_PROVIDER",
+  "scenarios": [
+    {
+      "scenario_id": "response_allowed_block_ip",
+      "purpose": "A policy-allowed block_ip executes through the mock provider and yields execution_status=executed.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "action_type": "block_ip",
+      "target": "203.0.113.66"
+    },
+    {
+      "scenario_id": "response_denied_isolate_endpoint",
+      "purpose": "A policy-DENIED isolate_endpoint is refused by the response layer before any provider is contacted.",
+      "policy_scenario_id": "policy_isolate_endpoint_denied_without_attribution",
+      "action_type": "isolate_endpoint",
+      "target": "WIN-DC01.contoso.example"
+    },
+    {
+      "scenario_id": "response_requires_approval_quarantine_file",
+      "purpose": "A REQUIRES_APPROVAL decision is not executable without a real approval grant, so the response is rejected/skiped with an approval error code.",
+      "policy_scenario_id": "policy_quarantine_file_requires_approval",
+      "action_type": "quarantine_file",
+      "target": "C:\\Users\\Public\\AppData\\Local\\Temp\\loader\\stage2.ps1"
+    },
+    {
+      "scenario_id": "response_duplicate_execution",
+      "purpose": "Submitting the same (policy_decision_id, action_type, target) twice must be suppressed by the deterministic idempotency key: the same response_id is returned and only one execution is recorded.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "action_type": "block_ip",
+      "target": "203.0.113.66",
+      "repeat": 2
+    },
+    {
+      "scenario_id": "response_invalid_target",
+      "purpose": "An unsupported target shape for the action type is rejected by app.services.response.validator.validate_target and no provider is contacted.",
+      "policy_scenario_id": "policy_block_ip_allow",
+      "action_type": "block_ip",
+      "target": "not-an-ip-address"
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "description": "Policy Engine (app/services/policy) inputs. Every field here is a real PolicyInput field from app/schemas/policy_decision.py; the decision itself is produced only by the real PolicyDecisionEngine against the six shipped rules in app/services/policy/rules.py. The dataset states what each rule's gates require so a run is auditable against the code - it does not contain any decision.",
+  "shipped_rules": {
+    "POLICY-BLOCK-IP-001": "block_ip, min risk LOW, confidence >= 0.50, evidence required, allowed; approval above HIGH",
+    "POLICY-BLOCK-DOMAIN-001": "block_domain, min risk LOW, confidence >= 0.60, evidence required, allowed; approval above HIGH",
+    "POLICY-QUARANTINE-FILE-001": "quarantine_file, min risk MEDIUM, confidence >= 0.70, evidence required, always requires approval",
+    "POLICY-DISABLE-ACCOUNT-001": "disable_account, min risk MEDIUM, confidence >= 0.70, evidence required, always requires approval",
+    "POLICY-TERMINATE-SESSION-001": "terminate_session, min risk LOW, confidence >= 0.60, evidence required, allowed; approval above HIGH",
+    "POLICY-ISOLATE-ENDPOINT-001": "isolate_endpoint, min risk HIGH, confidence >= 0.70, evidence + investigation + supported attribution required, always requires approval"
+  },
+  "fail_closed": "An action with no applicable rule yields the engine's no-coverage decision rather than an allow.",
+  "scenarios": [
+    {
+      "scenario_id": "policy_block_ip_allow",
+      "purpose": "block_ip at MEDIUM risk with confidence above the 0.50 floor and evidence present. The rule's approval_above_risk_level=HIGH gate is inclusive, so only a risk level below HIGH is allowed outright.",
+      "requested_action": "block_ip",
+      "risk_level": "medium",
+      "risk_score": 0.485714,
+      "confidence": 0.8,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "risk_assessment"
+      ],
+      "expected_decision": "allowed"
+    },
+    {
+      "scenario_id": "policy_block_ip_requires_approval_above_high",
+      "purpose": "block_ip at HIGH risk. The rule's approval_above_risk_level=HIGH gate is inclusive ('at or above'), so the engine escalates to a human instead of allowing the block.",
+      "requested_action": "block_ip",
+      "risk_level": "high",
+      "risk_score": 0.7,
+      "confidence": 0.9,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "risk_assessment"
+      ],
+      "expected_decision": "requires_approval"
+    },
+    {
+      "scenario_id": "policy_block_ip_denied_without_evidence",
+      "purpose": "block_ip with the evidence requirement unmet. The engine denies rather than proceeding on an unsupported request.",
+      "requested_action": "block_ip",
+      "risk_level": "high",
+      "risk_score": 0.7,
+      "confidence": 0.8,
+      "attribution_status": null,
+      "investigation_available": false,
+      "evidence_references": [],
+      "expected_decision": "denied"
+    },
+    {
+      "scenario_id": "policy_quarantine_file_requires_approval",
+      "purpose": "quarantine_file at MEDIUM risk with confidence above the 0.70 floor. The rule sets requires_approval unconditionally, so even a satisfied gate routes to a human.",
+      "requested_action": "quarantine_file",
+      "risk_level": "medium",
+      "risk_score": 0.485714,
+      "confidence": 0.75,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "detection"
+      ],
+      "expected_decision": "requires_approval"
+    },
+    {
+      "scenario_id": "policy_isolate_endpoint_allowed_with_attribution",
+      "purpose": "isolate_endpoint is the high-impact rule: HIGH risk, confidence >= 0.70, investigation available and a supported attribution status. The gates pass, but the rule still requires approval, so this scenario is the legitimate route into the HITL and SOAR commands.",
+      "requested_action": "isolate_endpoint",
+      "risk_level": "high",
+      "risk_score": 0.7,
+      "confidence": 0.8,
+      "attribution_status": "attributed",
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "detection",
+        "risk_assessment"
+      ],
+      "expected_decision": "requires_approval"
+    },
+    {
+      "scenario_id": "policy_isolate_endpoint_denied_without_attribution",
+      "purpose": "The same action with attribution_status=null. The require_attribution gate cannot be satisfied, so the engine denies the containment request outright.",
+      "requested_action": "isolate_endpoint",
+      "risk_level": "high",
+      "risk_score": 0.7,
+      "confidence": 0.8,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "detection",
+        "risk_assessment"
+      ],
+      "expected_decision": "denied"
+    },
+    {
+      "scenario_id": "policy_isolate_endpoint_denied_low_risk",
+      "purpose": "isolate_endpoint below the rule's HIGH risk floor, showing the minimum_risk_level gate rejecting an under-scored containment request.",
+      "requested_action": "isolate_endpoint",
+      "risk_level": "low",
+      "risk_score": 0.27,
+      "confidence": 0.8,
+      "attribution_status": "attributed",
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation"
+      ],
+      "expected_decision": "denied"
+    },
+    {
+      "scenario_id": "policy_quarantine_file_requires_approval_critical_confidence",
+      "purpose": "quarantine_file at HIGH risk with full confidence. The rule sets requires_approval unconditionally, so the satisfied gate still routes to a human.",
+      "requested_action": "quarantine_file",
+      "risk_level": "high",
+      "risk_score": 0.714286,
+      "confidence": 0.95,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "risk_assessment",
+        "detection"
+      ],
+      "expected_decision": "requires_approval"
+    },
+    {
+      "scenario_id": "policy_quarantine_file_requires_approval_above_confidence_floor",
+      "purpose": "quarantine_file at HIGH risk with confidence exactly on the 0.70 floor. The floor is inclusive, and the unconditional requires_approval rule still escalates.",
+      "requested_action": "quarantine_file",
+      "risk_level": "high",
+      "risk_score": 0.7,
+      "confidence": 0.7,
+      "attribution_status": null,
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation"
+      ],
+      "expected_decision": "requires_approval"
+    },
+    {
+      "scenario_id": "policy_isolate_endpoint_requires_approval_with_attribution",
+      "purpose": "isolate_endpoint at HIGH risk with investigation evidence present. The rule's inclusive approval_above_risk_level=HIGH gate escalates the containment to a human.",
+      "requested_action": "isolate_endpoint",
+      "risk_level": "high",
+      "risk_score": 0.700001,
+      "confidence": 0.88,
+      "attribution_status": "attributed",
+      "investigation_available": true,
+      "evidence_references": [
+        "correlation",
+        "risk_assessment",
+        "attribution"
+      ],
+      "expected_decision": "requires_approval"
+    }
+  ],
+  "not_invented": [
+    "no decision, policy_decision_id, reason or requires_approval value is stored here",
+    "the approval-pending state is produced only by the HITL service, never asserted by this file"
+  ]
+}

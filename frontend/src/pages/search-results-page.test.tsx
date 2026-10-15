@@ -148,4 +148,23 @@ describe('SearchResultsPage', () => {
 
     expect(await screen.findByText(/no enrichment provider available/i)).toBeInTheDocument()
   })
+
+  it('advertises only questions the read-only querier actually supports', async () => {
+    renderWithProviders(<SearchResultsPage />, { entries: ['/'] })
+
+    await screen.findByText(/Ask the SOC querier/i)
+    const suggestions = (await screen.findByText(/Try:/i)).textContent ?? ''
+
+    // Correlations support get/recent/by_event/by_detection with no filters and
+    // no ordering, so "highest risk correlations" could never be answered and
+    // must not be offered as an example.
+    expect(suggestions).not.toMatch(/highest risk correlation/i)
+    expect(suggestions).not.toMatch(/active incidents/i)
+
+    // Every advertised example must be a supported capability.
+    expect(suggestions).toMatch(/recent detections/i)
+    expect(suggestions).toMatch(/recent correlations/i)
+    // risk_level is a real filter, but only on risk assessments.
+    expect(suggestions).toMatch(/critical risk assessments/i)
+  })
 })

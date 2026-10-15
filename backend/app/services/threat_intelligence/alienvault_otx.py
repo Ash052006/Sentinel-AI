@@ -121,6 +121,45 @@ _PULSE_LIST_FIELDS: tuple[str, ...] = (
 # Scalar fields kept from each ``validation`` entry.
 _VALIDATION_FIELDS: tuple[str, ...] = ("source", "message", "name")
 
+# Maximum characters of an OTX-supplied ``detail`` string ever echoed into a
+# provider error reason.  The reason is persisted on a lookup row and shown to
+# analysts, so it is bounded and whitespace-collapsed before use.
+_MAX_DETAIL_REASON_CHARS = 120
+
+#: Reason prefix used when OTX supplied its own ``detail`` explanation.  The
+#: HTTP status word is kept so the failure stays recognisable as a rejected
+#: request, while the provider's own words replace the provider's generic
+#: guess about *why* it was rejected.
+_REJECTED_BY_OTX = "bad request -- rejected by OTX: "
+
+#: Reason prefix for an OTX ``detail`` carried inside an HTTP 200 body.  No
+#: request was rejected there, so the status word must not be reused.
+_API_ERROR_DETAIL = "API error -- reported by OTX: "
+
+
+def _safe_detail(payload: Any) -> str | None:
+    """Return a bounded, single-line OTX ``detail`` string, or ``None``.
+
+    OTX reports *why* it refused a request in a top-level ``detail`` field --
+    for example ``{"detail": "IP is private."}`` with HTTP 400 for an RFC1918
+    address.  That string is the provider's own honest account of the refusal
+    and is strictly more useful than any generic message this provider could
+    invent on its behalf.
+
+    Anything that is not a short, single-line string is discarded rather than
+    echoed, so an unexpected body shape can never leak a large payload, a
+    credential, or provider HTML into a persisted reason.
+    """
+    if not isinstance(payload, dict):
+        return None
+    detail = payload.get("detail")
+    if not isinstance(detail, str):
+        return None
+    collapsed = " ".join(detail.split())
+    if not collapsed:
+        return None
+    return collapsed[:_MAX_DETAIL_REASON_CHARS]
+
 
 class _RetryableServerError(ProviderLookupError):
     """Internal marker for transient server-side failures (may be retried).
@@ -361,7 +400,15 @@ class AlienVaultOTXProvider(ThreatIntelProvider):
     # -- Response handling ----------------------------------------------------
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
-        """Translate the HTTP response into a data dict or raise."""
+        """Translate the HTTP response into a data dict or raise.
+
+        Every non-success status first recovers OTX's own ``detail`` string so
+        the raised reason reports what the provider actually said (for example
+        ``"IP is private."`` for an RFC1918 address) instead of a generic
+        guess.  When OTX sends no usable ``detail`` the pre-existing generic
+        reason is used unchanged, so an uninformative provider response can
+        never *remove* diagnostic detail that was previously available.
+        """
         status = response.status_code
 
         if status == 401:
@@ -389,13 +436,13 @@ class AlienVaultOTXProvider(ThreatIntelProvider):
         if status == 400:
             raise ProviderLookupError(
                 self.provider_name,
-                "bad request -- malformed indicator or API usage error",
+                self._reason("bad request -- malformed indicator or API usage error", response),
             )
 
         if status == 404:
             raise ProviderLookupError(
                 self.provider_name,
-                "not found -- no OTX record for this indicator",
+                self._reason("not found -- no OTX record for this indicator", response),
             )
 
         if status >= 500:
@@ -404,7 +451,7 @@ class AlienVaultOTXProvider(ThreatIntelProvider):
         if status != 200:
             raise ProviderLookupError(
                 self.provider_name,
-                f"unexpected HTTP status {status}",
+                self._reason(f"unexpected HTTP status {status}", response),
             )
 
         # Parse JSON body.
@@ -427,10 +474,45 @@ class AlienVaultOTXProvider(ThreatIntelProvider):
         if isinstance(payload.get("detail"), str) and "indicator" not in payload:
             raise ProviderLookupError(
                 self.provider_name,
-                "API error",
+                self._reason("API error", response, detail_prefix=_API_ERROR_DETAIL),
             )
 
         return payload
+
+    @staticmethod
+    def _reason(
+        generic: str,
+        response: httpx.Response,
+        *,
+        detail_prefix: str = _REJECTED_BY_OTX,
+    ) -> str:
+        """Return a reason that states OTX's own refusal when it gave one.
+
+        The provider reason is what gets persisted on the lookup row and shown
+        to the analyst, so it must report the provider's actual account rather
+        than assert a client-side defect the provider never claimed.  For
+        example OTX answers an RFC1918 address with HTTP 400 and
+        ``{"detail": "IP is private."}`` — calling that a "malformed
+        indicator" would be false, since the address is a perfectly valid IPv4
+        address that OTX simply does not hold intelligence for.
+
+        *detail_prefix* is the wording used when a detail was recovered, and
+        differs per call site because the honest status word differs: a HTTP
+        400 really is a bad request, whereas a HTTP 200 body carrying an OTX
+        ``detail`` is not a rejected request at all.
+
+        A body that cannot be parsed as JSON, or that carries no usable
+        ``detail``, leaves the caller's generic reason untouched, so an
+        uninformative provider response can never *remove* diagnostic detail
+        that was previously available.
+        """
+        try:
+            detail = _safe_detail(response.json())
+        except Exception:  # noqa: BLE001 - an unreadable body is not a reason
+            detail = None
+        if detail is None:
+            return generic
+        return f"{detail_prefix}{detail}"
 
     # -- Result parsing -------------------------------------------------------
 

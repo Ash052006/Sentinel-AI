@@ -1,0 +1,102 @@
+{
+  "description": "Natural Language SOC (app/services/soc) inputs. The LLM is used ONLY for language understanding: it must return an app.schemas.soc_query.SOCModelIntent whose resource+operation pair is on the allowlist in app/services/soc/registry.py. It never emits SQL and never invents a table or function. The utterances below are the Gemini inputs; the structured_queries are the same intents expressed directly, so the allowlisted executor can be proven offline without an API key.",
+  "allowlisted_resources": ["detections", "correlations", "risk_assessments", "incident_memories"],
+  "allowlisted_operations": ["get", "list", "recent", "by_event", "by_correlation", "by_detection", "by_rule"],
+  "natural_language_queries": [
+    {
+      "query_id": "soc_nl_recent_detections",
+      "query": "show recent detections",
+      "expected_resource": "detections",
+      "expected_operation": "recent",
+      "handler": "app.services.soc.registry HANDLERS[(detections, recent)] -> DetectionQueryService.list_recent_results",
+      "requires_gemini": true
+    },
+    {
+      "query_id": "soc_nl_recent_correlations",
+      "query": "show me the most recent correlations",
+      "expected_resource": "correlations",
+      "expected_operation": "recent",
+      "handler": "app.services.soc.registry HANDLERS[(correlations, recent)] -> CorrelationQueryService.list_recent_correlations",
+      "requires_gemini": true
+    },
+    {
+      "query_id": "soc_nl_risk_for_correlation",
+      "query": "what is the risk assessment for the latest correlation?",
+      "expected_resource": "risk_assessments",
+      "expected_operation": "by_correlation",
+      "handler": "app.services.soc.registry HANDLERS[(risk_assessments, by_correlation)] -> RiskQueryService.get_assessment_for_correlation",
+      "target_from": "persisted_correlation_id",
+      "requires_gemini": true
+    },
+    {
+      "query_id": "soc_nl_detections_for_rule",
+      "query": "which detections matched the suspicious PowerShell rule?",
+      "expected_resource": "detections",
+      "expected_operation": "by_rule",
+      "handler": "app.services.soc.registry HANDLERS[(detections, by_rule)] -> DetectionQueryService.list_results_by_rule",
+      "target_from": "shipped_sigma_rule_id",
+      "requires_gemini": true
+    },
+    {
+      "query_id": "soc_nl_memories_for_correlation",
+      "query": "do we have any incident memory for this correlation?",
+      "expected_resource": "incident_memories",
+      "expected_operation": "by_correlation",
+      "handler": "app.services/soc/registry.py HANDLERS[(incident_memories, by_correlation)] -> IncidentMemoryQueryService.list_memories_for_correlation",
+      "target_from": "persisted_correlation_id",
+      "requires_gemini": true
+    }
+  ],
+  "structured_queries": [
+    {
+      "query_id": "soc_structured_recent_detections",
+      "purpose": "Deterministic offline path: the validated intent is executed by the real SOCQueryExecutor without any LLM, proving the allowlisted executor can read detections.",
+      "resource": "detections",
+      "operation": "recent",
+      "pagination": {"limit": 20}
+    },
+    {
+      "query_id": "soc_structured_recent_correlations",
+      "purpose": "Recent correlations feed, executed against the rows the full-SOC scenario just persisted.",
+      "resource": "correlations",
+      "operation": "recent",
+      "pagination": {"limit": 20}
+    },
+    {
+      "query_id": "soc_structured_risk_by_correlation",
+      "purpose": "Risk assessment for the correlation id the runner minted from the real pipeline; the id is substituted at run time, never hard-coded here.",
+      "resource": "risk_assessments",
+      "operation": "by_correlation",
+      "target_from": "persisted_correlation_id"
+    },
+    {
+      "query_id": "soc_structured_memories_by_correlation",
+      "purpose": "Incident memories linked to a correlation, showing recalled history is retrievable next to live analytical data.",
+      "resource": "incident_memories",
+      "operation": "by_correlation",
+      "target_from": "persisted_correlation_id"
+    },
+    {
+      "query_id": "soc_structured_detections_by_rule",
+      "purpose": "Detections for one shipped Sigma rule id, proving by_rule is allowlisted for detections. The rule id is read from the real registry at run time.",
+      "resource": "detections",
+      "operation": "by_rule",
+      "target_from": "shipped_sigma_rule_id",
+      "pagination": {"page": 1, "page_size": 20}
+    }
+  ],
+  "out_of_grammar_examples": [
+    {
+      "query": "list the files on the web server",
+      "why_rejected": "no allowlisted resource matches; the validator fails closed rather than guessing, and 'incident_learning' is deliberately not a resource because it has no read-only query service"
+    },
+    {
+      "query": "delete every high risk assessment",
+      "why_rejected": "the grammar is read-only: there is no write operation on the allowlist"
+    },
+    {
+      "query": "run SELECT against the detections table",
+      "why_rejected": "the model returns a structured intent only; raw SQL is never accepted or executed"
+    }
+  ]
+}

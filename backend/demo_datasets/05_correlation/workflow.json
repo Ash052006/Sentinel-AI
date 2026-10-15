@@ -1,0 +1,35 @@
+{
+  "function": "05_correlation",
+  "kind": "workflow",
+  "input_dataset": "focused_event.jsonl",
+  "services": [
+    "app.services.detection.rule_loader.build_registry",
+    "app.agents.detection.DetectionAgent",
+    "app.agents.correlation.CorrelationAgent"
+  ],
+  "correlation_batch_schema": "app.schemas.detection_correlation.DetectionCorrelationBatch",
+  "correlation_input_schema": "app.schemas.detection_correlation.DetectionCorrelationInput",
+  "required_batch_fields": [
+    "detections",
+    "metadata.record_count"
+  ],
+  "command": "python scripts/run_demo_dataset.py correlation demo_datasets/05_correlation/focused_event.jsonl",
+  "expected_behaviour": {
+    "detections_from_one_event": 7,
+    "rule_ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "14000000-0000-4000-8000-000000000000",
+      "15000000-0000-4000-8000-000000000000",
+      "18000000-0000-4000-8000-000000000000",
+      "19000000-0000-4000-8000-000000000000",
+      "21000000-0000-4000-8000-000000000000",
+      "66666666-6666-4666-8666-666666666666"
+    ],
+    "multi_member_correlations": 1,
+    "members": 7,
+    "distinct_events": 1,
+    "risk_score": 0.628571,
+    "risk_level": "high"
+  },
+  "critical_limitation": "CorrelationStrategy 'deterministic_same_event' groups ONLY by identical event_id. A multi-EVENT attack chain therefore does NOT correlate. The only way to obtain a multi-member correlation is for 2+ rules to match the SAME event, which focused_event.jsonl does by tripping 7 rules."
+}

@@ -32,7 +32,7 @@ from app.services.soc.gemini import (
 )
 
 _TEST_KEY = "test-soc-gemini-api-key"
-_SOC_MODEL = "gemini-2.0-flash"
+_SOC_MODEL = "gemini-3.8-flash"
 _BASE = "https://generativelanguage.googleapis.com"
 
 _OK_PAYLOAD = {
@@ -274,10 +274,53 @@ class TestHttpErrorMapping:
         with pytest.raises(SOCProviderError):
             parser.parse("question")
 
-    def test_429_rate_limit_terminal(self) -> None:
-        parser = _parser(lambda r: httpx.Response(429, json={}, request=r), max_retries=2)
+    def test_429_retried_then_unavailable(self) -> None:
+        attempts = {"n": 0}
+        sleeps: list[float] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts["n"] += 1
+            return httpx.Response(
+                429, json={}, headers={"Retry-After": "3"}, request=request
+            )
+
+        parser = _parser(handler, sleeps=sleeps, max_retries=2)
         with pytest.raises(SOCProviderUnavailableError):
             parser.parse("question")
+        assert attempts["n"] == 3
+        assert sleeps == [3.0, 3.0]
+
+    def test_429_recovers_on_retry(self) -> None:
+        attempts = {"n": 0}
+        sleeps: list[float] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                return httpx.Response(429, json={}, request=request)
+            return httpx.Response(200, json=_OK_PAYLOAD, request=request)
+
+        parser = _parser(handler, sleeps=sleeps, max_retries=2)
+        result = parser.parse("question")
+        assert attempts["n"] == 2
+        assert "operation" in result.raw_text
+        assert sleeps == [1.0]
+
+    def test_429_absurd_retry_after_is_clamped(self) -> None:
+        sleeps: list[float] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                429,
+                json={},
+                headers={"Retry-After": "999999"},
+                request=request,
+            )
+
+        parser = _parser(handler, sleeps=sleeps, max_retries=1)
+        with pytest.raises(SOCProviderUnavailableError):
+            parser.parse("question")
+        assert sleeps == [30.0]
 
     def test_5xx_retried_then_unavailable(self) -> None:
         sleeps: list[float] = []

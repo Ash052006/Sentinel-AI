@@ -338,9 +338,26 @@ class ApprovalRecord(BaseModel):
 
     "Approved" therefore never implies "executed", and "executed" never
     implies a human approved when ``response_status`` is absent.
+
+    ``decision`` is the verbatim Step 24 :class:`PolicyDecision` snapshot
+    the row was created from.  It is stored on every row precisely so the
+    exact machine decision behind the human grant stays auditable and
+    re-presentable; without it a reader can only see the flattened
+    ``reason`` / ``policy_rule_id`` columns and cannot recover the policy
+    name, the gate results, or the ``decision_path``.  It may be ``None``
+    only for rows written before the snapshot was retained.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    decision: PolicyDecision | None = Field(
+        default=None,
+        description=(
+            "The verbatim Step 24 policy decision this approval was routed "
+            "from, including the policy name, gate results and decision "
+            "path.  Never re-derived: returned exactly as persisted."
+        ),
+    )
 
     id: uuid.UUID = Field(
         ...,

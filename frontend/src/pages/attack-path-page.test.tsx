@@ -113,7 +113,35 @@ vi.mock('../api/attack-paths', () => ({
   },
 }))
 
+// The bare /attack-paths route lists the correlations that actually exist, so
+// the graph can be opened without hand-editing the URL.
+vi.mock('../api/correlations', () => ({
+  correlationsApi: {
+    recent: vi.fn(),
+  },
+}))
+
 const attackPathsApi = (await import('../api/attack-paths')).attackPathsApi
+const correlationsApi = (await import('../api/correlations')).correlationsApi
+
+const OTHER_CORR = '00000000-0000-0000-0000-0000000000ff'
+
+function correlation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'corr-row',
+    correlation_id: CORR,
+    status: 'active',
+    confidence: 0.9,
+    evidence: {},
+    result_metadata: {},
+    timestamp: '2027-10-23T04:00:00Z',
+    provenance: 'correlated',
+    members: [],
+    created_at: '2027-10-23T04:00:00Z',
+    updated_at: '2027-10-23T04:00:00Z',
+    ...overrides,
+  }
+}
 
 function renderGraph(): void {
   renderWithProviders(
@@ -226,7 +254,12 @@ describe('AttackPathPage', () => {
     expect(screen.getByTestId('loading-rows')).toBeInTheDocument()
   })
 
-  it('prompts for a correlation when none is selected', () => {
+  it('lists persisted correlations so the graph needs no manual URL edit', async () => {
+    vi.mocked(correlationsApi.recent).mockResolvedValue([
+      correlation(),
+      correlation({ correlation_id: OTHER_CORR, confidence: null }),
+    ] as never)
+
     renderWithProviders(
       <Routes>
         <Route path="/attack-paths" element={<AttackPathPage />} />
@@ -238,6 +271,33 @@ describe('AttackPathPage', () => {
       },
     )
 
-    expect(screen.getByText('No correlation selected')).toBeInTheDocument()
+    expect(await screen.findByTestId('attack-path-picker')).toBeInTheDocument()
+    // Both real rows are offered, each linking straight at its own graph.
+    const links = await screen.findAllByRole('link', { name: /view attack path/i })
+    expect(links.map((l) => l.getAttribute('href'))).toEqual([
+      `/attack-paths/${CORR}`,
+      `/attack-paths/${OTHER_CORR}`,
+    ])
+    // An unrecorded confidence is stated as such rather than rendered as 0.
+    expect(screen.getByText('not recorded')).toBeInTheDocument()
+    // No graph call is made until a correlation is actually chosen.
+    expect(attackPathsApi.graph).not.toHaveBeenCalled()
+  })
+
+  it('says so honestly when nothing has been correlated yet', async () => {
+    vi.mocked(correlationsApi.recent).mockResolvedValue([])
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/attack-paths" element={<AttackPathPage />} />
+        <Route path="/attack-paths/:correlationId" element={<AttackPathPage />} />
+      </Routes>,
+      {
+        route: '/attack-paths',
+        entries: ['/attack-paths'],
+      },
+    )
+
+    expect(await screen.findByText('No correlations persisted')).toBeInTheDocument()
   })
 })

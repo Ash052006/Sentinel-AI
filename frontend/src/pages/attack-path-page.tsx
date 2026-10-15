@@ -3,9 +3,10 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronLeft, Network } from 'lucide-react'
 import { attackPathsApi } from '../api/attack-paths'
+import { correlationsApi } from '../api/correlations'
 import { AttackPathGraph } from '../components/attack-path-graph'
 import { EmptyState, ErrorState, LoadingRows, NotAvailable } from '../components/states'
-import { ProvenanceBadge } from '../components/badges'
+import { CorrelationStatusBadge, ProvenanceBadge } from '../components/badges'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, Panel, Stat } from '../components/ui/card'
@@ -54,6 +55,18 @@ export function AttackPathPage() {
 
   const response = graphQuery.data
 
+  // The bare /attack-paths route is a real entry point, not a dead end: it
+  // lists the correlations that actually exist so the graph can be opened
+  // without hand-editing the URL.  Nothing is auto-selected, because silently
+  // projecting an arbitrary correlation would misrepresent which incident the
+  // graph describes.
+  const correlations = useQuery({
+    queryKey: ['correlations', 'recent', 50],
+    queryFn: () => correlationsApi.recent(50),
+    enabled: correlationId.length === 0,
+  })
+  const availableCorrelations = correlations.data ?? []
+
   if (!correlationId) {
     return (
       <div className="mx-auto max-w-7xl space-y-4">
@@ -68,11 +81,67 @@ export function AttackPathPage() {
             </Link>
           </Button>
         </PageHeader>
-        <Panel title="Open a correlation first">
-          <NotAvailable
-            title="No correlation selected"
-            body="Open a correlation and choose View attack path to render its evidence-grounded projection of persisted detections, intelligence, risk, memory, hunts, policy and SOAR records."
-          />
+        <Panel
+          title="Choose a correlation"
+          subtitle="Every row is a persisted correlation. The attack path is projected from recorded evidence only, so it is built for one correlation at a time."
+          padded={false}
+          data-testid="attack-path-picker"
+        >
+          {correlations.isLoading ? (
+            <LoadingRows rows={6} />
+          ) : correlations.isError ? (
+            <ErrorState
+              message={String(correlations.error)}
+              onRetry={() => void correlations.refetch()}
+            />
+          ) : availableCorrelations.length === 0 ? (
+            <NotAvailable
+              title="No correlations persisted"
+              body="The projection reads already-persisted detections, intelligence, risk, memory, hunts, policy and SOAR records for one correlation. Nothing has been correlated yet, so there is no graph to project."
+            />
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Correlation</Th>
+                  <Th>Status</Th>
+                  <Th>Confidence</Th>
+                  <Th>Members</Th>
+                  <Th>Observed</Th>
+                  <Th>Provenance</Th>
+                  <Th />
+                </tr>
+              </thead>
+              <tbody>
+                {availableCorrelations.map((row) => (
+                  <TRow key={row.correlation_id}>
+                    <Td className="font-mono text-[11px] text-ink">
+                      <MonoId id={row.correlation_id} />
+                    </Td>
+                    <Td>
+                      <CorrelationStatusBadge status={row.status} />
+                    </Td>
+                    <Td className="font-mono text-[11px] text-ink-dim">
+                      {row.confidence === null ? 'not recorded' : row.confidence.toFixed(2)}
+                    </Td>
+                    <Td className="font-mono text-[11px] text-ink-dim">{row.members.length}</Td>
+                    <Td className="text-[11px] text-ink-dim">{formatDateTime(row.timestamp)}</Td>
+                    <Td>
+                      <ProvenanceBadge provenance={row.provenance} />
+                    </Td>
+                    <Td>
+                      <Button asChild size="sm" variant="outline">
+                        <Link to={`/attack-paths/${row.correlation_id}`}>
+                          <Network className="h-3 w-3" aria-hidden="true" />
+                          View attack path
+                        </Link>
+                      </Button>
+                    </Td>
+                  </TRow>
+                ))}
+              </tbody>
+            </Table>
+          )}
         </Panel>
       </div>
     )

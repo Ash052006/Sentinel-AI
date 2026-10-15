@@ -1,0 +1,22 @@
+{
+  "function": "09_policy",
+  "kind": "workflow",
+  "schema": "app.schemas.policy_decision.PolicyInput",
+  "required_fields": [
+    "correlation_id",
+    "requested_action",
+    "risk_level"
+  ],
+  "optional_fields": [
+    "risk_score",
+    "confidence",
+    "attribution_status",
+    "investigation_available",
+    "evidence_available",
+    "evidence_references"
+  ],
+  "action_enum": "app.schemas.response.ResponseActionType",
+  "persistence": false,
+  "api": false,
+  "limitation": "Library-only: no API route and no persistence table."
+}

@@ -3,7 +3,7 @@
 :class:`SOCQueryService` composes the controlled pipeline::
 
     natural-language query
-        -> SOC intent parser (Gemini adapter, raw structured output only)
+        -> SOC intent parser (Groq adapter, raw structured output only)
         -> strict JSON / candidate-intent validation (fail closed)
         -> deterministc allowlist-intent validation
         -> read-only query executor (existing query services)
@@ -27,7 +27,7 @@ from app.schemas.soc_query import (
 )
 from app.services.soc.errors import SOCInputValidationError, SOCInternalError
 from app.services.soc.executor import SOCQueryExecutor
-from app.services.soc.gemini import GeminiSOCIntentParser
+from app.services.soc.groq import GroqSOCIntentParser
 from app.services.soc.parser import (
     SOCIntentParser,
     SOCParseResult,
@@ -46,15 +46,15 @@ class SOCQueryService:
 
     Args:
         parser: Optional :class:`SOCIntentParser`.  Defaults to a lazily
-            constructed :class:`GeminiSOCIntentParser` (never built at
-            import time, so an unset ``GEMINI_API_KEY`` cannot break app
+            constructed :class:`GroqSOCIntentParser` (never built at
+            import time, so an unset ``GROQ_API_KEY`` cannot break app
             import; configuration failures surface as sanitized errors on
             the first query).
         executor: Optional :class:`SOCQueryExecutor`.  Defaults to the
             canonical executor over the allowlist registry.
         clock: Overridable UTC clock for deterministic timestamps.
         prompt_builder: Optional prompt builder passed to the lazily built
-            Gemini parser.
+            Groq parser.
     """
 
     def __init__(
@@ -78,7 +78,7 @@ class SOCQueryService:
 
     def _resolve_parser(self) -> SOCIntentParser:
         if self._parser is None:
-            self._parser = GeminiSOCIntentParser(
+            self._parser = GroqSOCIntentParser(
                 prompt_builder=self._prompt_builder
             )
         return self._parser

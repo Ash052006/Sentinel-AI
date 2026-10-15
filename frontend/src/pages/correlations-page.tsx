@@ -56,7 +56,11 @@ export function CorrelationsPage() {
         </Select>
       </PageHeader>
 
-      <Panel padded={false}>
+      <Panel
+        padded={false}
+        title="Persisted correlations"
+        subtitle="Grouped by the Step 10B engine on shared source event. A dash in Confidence means the engine produced no numeric correlation-level confidence — the same-event strategy never aggregates member detection confidence, so the column stays empty rather than inventing a number."
+      >
         {correlations.isLoading ? (
           <LoadingRows rows={8} />
         ) : correlations.isError ? (

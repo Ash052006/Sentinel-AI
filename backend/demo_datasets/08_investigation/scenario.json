@@ -1,0 +1,17 @@
+{
+  "description": "AI Investigation (08) input. The dataset is the PERSISTED CONTEXT only - the Gemini answer is never stored here. The real flow is: ingest 00_full_soc_scenario/attack_chain.jsonl -> real InvestigationContextBuilder assembles an InvestigationContext from the persisted correlation, members, detections, risk assessment, threat-intel indicators/lookups, enrichments and event provenance -> the real InvestigationAgent calls Gemini -> a structured InvestigationResult pinned to AI_GENERATED is produced. The model can only cite evidence ids that already exist in the context.",
+  "context_builder": "app.schemas.investigation_context.InvestigationContextBuilder",
+  "agent": "app.agents.investigation.InvestigationAgent",
+  "provider": "app.agents.investigation.gemini (Gemini via app/core/config.py gemini_api_key)",
+  "correlation_id": {"resolved_from": "00_full_soc_scenario/attack_chain.jsonl", "placeholder": "<generated_correlation_id>"},
+  "requires_gemini": true,
+  "offline_path": {
+    "purpose": "Context assembly and every contract bound (evidence identity, per-section caps, total-size cap, secret scan) are fully verifiable WITHOUT a model call. The runner always builds and validates the context; only the investigate() step needs GEMINI_API_KEY.",
+    "verifiable_offline": ["context_builds", "evidence_ids_are_deterministic_uuid5", "input_availability_markers", "bounds_enforced"]
+  },
+  "safety": [
+    "No credentials, tokens or keys appear in the context; the builder scans for api_key/authorization/bearer/secret.",
+    "The prompt pins the context as untrusted data, not instructions.",
+    "The agent rejects empty, oversized, fenced, non-strict-JSON or contract-violating model output instead of repairing it."
+  ]
+}

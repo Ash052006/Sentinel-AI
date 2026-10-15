@@ -54,6 +54,10 @@ logger = logging.getLogger(__name__)
 #: Backoff base for transient retries (seconds), multiplicative per attempt.
 _RETRY_BASE_DELAY = 1.0
 
+#: Upper bound on any single retry sleep (seconds), so a hostile or
+#: nonsensical ``Retry-After`` header can never stall a request indefinitely.
+_MAX_RETRY_SLEEP_SECONDS = 30.0
+
 #: Default generation token cap for the tiny SOC intent JSON.  This is a
 #: *lower* bound than the investigation agent's cap — the SOC output is a
 #: small structured intent and never needs the full model budget.
@@ -64,11 +68,47 @@ DEFAULT_SOC_TEMPERATURE = 0.0
 
 
 class _TransientProviderError(SOCProviderError):
-    """Internal marker for retryable server-side failures (5xx)."""
+    """Internal marker for retryable provider failures (5xx and 429).
 
-    def __init__(self, status: int, provider: str) -> None:
-        super().__init__(f"server error (HTTP {status})", provider=provider)
+    Carries an optional provider-supplied ``retry_after`` so the caller can
+    honour the server's own pacing hint instead of guessing.  Never escapes
+    the parser: consumers observe a regular
+    :class:`SOCProviderUnavailableError` once retries are exhausted.
+    """
+
+    def __init__(
+        self,
+        status: int,
+        provider: str,
+        *,
+        retry_after: float | None = None,
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            message or f"server error (HTTP {status})", provider=provider
+        )
         self.status = status
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(response: Any) -> float | None:
+    """Return a usable ``Retry-After`` delay from *response*, or ``None``.
+
+    Only the delta-seconds form is honoured, and only when it is a finite,
+    non-negative number.  The HTTP-date form and anything unparsable fall
+    through to ``None`` so the caller uses its own bounded backoff instead of
+    trusting an unverified value.
+    """
+    header = response.headers.get("Retry-After")
+    if not header:
+        return None
+    try:
+        value = float(header)
+    except (TypeError, ValueError):
+        return None
+    if value < 0 or value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value
 
 
 class GeminiSOCIntentParser(SOCIntentParser):
@@ -236,9 +276,16 @@ class GeminiSOCIntentParser(SOCIntentParser):
     ) -> Any:
         """POST *payload* with bounded retry on transient failures only.
 
-        Retries 5xx server errors, transport-level failures, and timeouts.
-        Never retries 4xx client errors (including rate limits) or
-        authentication failures.
+        Retries 5xx server errors, HTTP 429 rate limits, transport-level
+        failures, and timeouts.  Never retries other 4xx client errors or
+        authentication failures, which cannot succeed on repetition.
+
+        A 429 is retried because it is by definition a *transient* refusal:
+        the provider is asking for back-pressure, not rejecting the request.
+        When the provider supplies a usable ``Retry-After`` the parser honours
+        it (bounded by :data:`_MAX_RETRY_SLEEP_SECONDS`) instead of guessing,
+        so a rate limit that clears in a second is survived rather than being
+        reported to the analyst as the parser being unavailable.
         """
         last_exc: Exception | None = None
 
@@ -251,17 +298,16 @@ class GeminiSOCIntentParser(SOCIntentParser):
             except _TransientProviderError as exc:
                 last_exc = exc
                 logger.warning(
-                    "soc gemini server error (attempt %d/%d): HTTP %d",
+                    "soc gemini transient provider error (attempt %d/%d): HTTP %d",
                     attempt,
                     self._max_retries + 1,
                     exc.status,
                 )
                 if attempt <= self._max_retries:
-                    self._sleep(_RETRY_BASE_DELAY * attempt)
+                    self._sleep(self._backoff(attempt, exc.retry_after))
                     continue
                 raise SOCProviderUnavailableError(
-                    f"server error (HTTP {exc.status})",
-                    provider=self.provider_name,
+                    str(exc), provider=self.provider_name
                 ) from exc
             except SOCProviderError:
                 raise
@@ -300,6 +346,20 @@ class GeminiSOCIntentParser(SOCIntentParser):
 
     # -- Response handling ---------------------------------------------------
 
+    @staticmethod
+    def _backoff(attempt: int, retry_after: float | None) -> float:
+        """Return the sleep before retry *attempt*.
+
+        A provider-supplied ``retry_after`` wins, because the provider knows
+        when its own rate limit clears.  It is still clamped to
+        :data:`_MAX_RETRY_SLEEP_SECONDS` so a pathological header cannot turn
+        a bounded retry into an unbounded stall.  With no usable hint the
+        original bounded linear backoff is used unchanged.
+        """
+        if retry_after is not None:
+            return min(retry_after, _MAX_RETRY_SLEEP_SECONDS)
+        return _RETRY_BASE_DELAY * attempt
+
     def _handle_response(self, response: httpx.Response) -> Any:
         status = response.status_code
 
@@ -314,8 +374,13 @@ class GeminiSOCIntentParser(SOCIntentParser):
                 provider=self.provider_name,
             )
         if status == 429:
-            raise SOCProviderUnavailableError(
-                "rate limit exceeded", provider=self.provider_name
+            # Retryable: the provider is applying back-pressure, not rejecting
+            # the request.  Honour its own Retry-After hint when it sends one.
+            raise _TransientProviderError(
+                429,
+                self.provider_name,
+                retry_after=_retry_after_seconds(response),
+                message="rate limit exceeded",
             )
         if status == 400:
             raise SOCProviderError(

@@ -1,6 +1,8 @@
 import { Badge } from './ui/badge'
 import {
+  approvalStatusMeta,
   memoryTypeLabel,
+  policyDecisionMeta,
   provenanceLabel,
   provenanceTone,
   riskTone,
@@ -9,9 +11,11 @@ import {
   statusMeta,
 } from '../lib/labels'
 import type {
+  ApprovalStatus,
   CorrelationStatus,
   DetectionSeverity,
   MemoryType,
+  PolicyDecisionStatus,
   Provenance,
   RiskLevel,
   RuleType,
@@ -44,4 +48,14 @@ export function MemoryTypeBadge({ type }: { type: MemoryType }) {
 
 export function RuleTypeBadge({ ruleType }: { ruleType: RuleType }) {
   return <Badge tone="muted">{ruleTypeLabel[ruleType]}</Badge>
+}
+
+export function ApprovalStatusBadge({ status }: { status: ApprovalStatus }) {
+  const meta = approvalStatusMeta[status]
+  return <Badge tone={meta.tone}>{meta.label}</Badge>
+}
+
+export function PolicyDecisionBadge({ status }: { status: PolicyDecisionStatus }) {
+  const meta = policyDecisionMeta[status]
+  return <Badge tone={meta.tone}>{meta.label}</Badge>
 }
