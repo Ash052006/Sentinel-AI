@@ -48,6 +48,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy.orm import Session
 
 from app.agents.debate.engine import DebateEngine
+from app.agents.debate.evidence import graph_snapshot_digest
 from app.agents.debate.exceptions import (
     DebateBoundsError,
     DebateError,
@@ -198,6 +199,21 @@ def run_debate(
     """
     graph = _graph_or_404(db, correlation_id)
     queries = KnowledgeGraphQueries(DEFAULT_BOUNDS)
+
+    # Fast-path for unchanged graph: if a debate was already run over this exact
+    # graph snapshot, return the stored conclusion directly rather than running
+    # a duplicate debate.
+    service = DebateService(db)
+    snapshot_digest = graph_snapshot_digest(graph)
+    for existing in service.list_for_correlation(correlation_id):
+        if existing.metadata.graph_snapshot_digest == snapshot_digest:
+            logger.info(
+                "returning stored debate %s for correlation %s",
+                existing.debate_id,
+                correlation_id,
+            )
+            return existing
+
     try:
         session = _engine().run(
             graph,

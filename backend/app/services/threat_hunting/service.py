@@ -230,6 +230,19 @@ class ThreatHuntService:
             ),
             ip_address=None,
         )
+        # The hunt artifacts are durable; refresh each affected correlation's
+        # graph so the new INVESTIGATED_BY_HUNT evidence becomes visible.
+        _refresh_correlation_graphs(
+            db,
+            sorted(
+                {
+                    item.correlation_id
+                    for item in result.evidence
+                    if item.correlation_id is not None
+                },
+                key=str,
+            ),
+        )
         updated = repo.get_hunt(db, hunt_id)
         return _detail_from_row(updated)  # type: ignore[arg-type]
 
@@ -359,6 +372,23 @@ def _fail(
         ip_address=None,
     )
     db.commit()
+
+
+def _refresh_correlation_graphs(
+    db: Session, correlation_ids: list[uuid.UUID]
+) -> None:
+    """Best-effort refresh of hunt-affected correlation subgraphs.
+
+    Called after the hunt artifacts are durable.  Isolated by the shared
+    materializer, which logs and swallows any graph failure.
+    """
+    if not correlation_ids:
+        return
+    from app.services.knowledge_graph.materialization import (
+        refresh_correlation_graphs,
+    )
+
+    refresh_correlation_graphs(db, correlation_ids)
 
 
 def _persist_result(db: Session, hunt_id: uuid.UUID, result) -> None:

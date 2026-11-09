@@ -56,6 +56,11 @@ from app.schemas.correlation import (
 )
 from app.schemas.correlation import CorrelationStatus
 from app.schemas.security_event import Provenance
+from app.services.knowledge_graph.materialization import (
+    GraphMaterializer,
+    materialize_correlation_graph,
+    refresh_correlation_graphs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +184,22 @@ def _prepare_structured(
 
 
 # ---------------------------------------------------------------------------
+# Knowledge-graph materialization (post-commit side effect)
+# ---------------------------------------------------------------------------
+
+def _materialize_correlation_graph(db: Session, correlation_id: uuid.UUID) -> None:
+    """Default post-commit hook: upsert one correlation's graph subgraph.
+
+    Reuses the caller's (already committed) session, so the graph is derived
+    from exactly the durable V2 state the caller just published — no second
+    connection and no cross-transaction coordination.  Delegates to the
+    shared, equally idempotent hook in
+    :mod:`app.services.knowledge_graph.materialization`.
+    """
+    materialize_correlation_graph(db, correlation_id)
+
+
+# ---------------------------------------------------------------------------
 # Persistence service
 # ---------------------------------------------------------------------------
 
@@ -191,6 +212,13 @@ class CorrelationPersistenceService:
     with a single ``commit()``.  The Correlation Agent never commits or
     rolls back — persistence is an injected side-effect sink.
 
+    Once a batch is durable, the service materializes each correlation's
+    knowledge graph through an injected :data:`GraphMaterializer`.  The graph
+    is therefore built only from committed state (never from a transaction
+    that could still roll back), and a materialization failure is logged and
+    isolated so it can never undo or mask a successfully persisted
+    correlation.
+
     Args:
         repository_factory: Optional repository factory; defaults to
             :class:`CorrelationRepository`.  Injected for testability.
@@ -198,15 +226,21 @@ class CorrelationPersistenceService:
             detection persistence service.  Parent ``timestamp`` values come
             from the Step 10A result itself, so the clock is unused by the
             current persistence path.
+        graph_materializer: Optional post-commit graph hook; defaults to
+            :func:`_materialize_correlation_graph`.  Injected for testability.
     """
 
     def __init__(
         self,
         repository_factory: Callable[[Session], CorrelationRepository] = CorrelationRepository,
         clock: Callable[[], datetime] | None = None,
+        graph_materializer: GraphMaterializer | None = None,
     ) -> None:
         self._repository_factory = repository_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._graph_materializer = (
+            graph_materializer or _materialize_correlation_graph
+        )
 
     def persist_correlations(
         self,
@@ -259,6 +293,7 @@ class CorrelationPersistenceService:
 
         created = skipped = 0
         correlation_ids: list[uuid.UUID] = []
+        skipped_ids: list[uuid.UUID] = []
         member_counts: list[int] = []
         staged = False
 
@@ -274,6 +309,7 @@ class CorrelationPersistenceService:
 
             if repo.get_by_correlation_id(result.correlation_id) is not None:
                 skipped += 1
+                skipped_ids.append(result.correlation_id)
                 continue
 
             if not isinstance(result.status, CorrelationStatus):
@@ -328,16 +364,36 @@ class CorrelationPersistenceService:
             created += 1
             staged = True
 
-        # Stage; flush so rows materialize, then publish atomically.
+        # Publish the correlations first: the graph is materialized strictly
+        # from durable state, never from a transaction that could still roll
+        # back.  Committing the whole session also flushes any pending work,
+        # so every id in this batch (created just now, or skipped because it
+        # was already durable) is safe to re-derive from real rows.
         if staged:
             db.flush()
             db.commit()
+            self._materialize_graphs(db, [*correlation_ids, *skipped_ids])
 
         return CorrelationPersistenceSummary(
             correlation_ids=tuple(correlation_ids),
             correlations_created=created,
             correlations_skipped=skipped,
             member_counts=tuple(member_counts),
+        )
+
+    def _materialize_graphs(
+        self, db: Session, correlation_ids: list[uuid.UUID]
+    ) -> None:
+        """Materialize the knowledge graph for each freshly-published correlation.
+
+        Called strictly after the batch commit, so every id is already durable.
+        Each materialization is isolated: a failure is logged with the
+        correlation id (observable, and retryable on demand via
+        ``build-knowledge-graph --correlation-id``) but never rolls back the
+        committed correlation or masks it as a persistence failure.
+        """
+        refresh_correlation_graphs(
+            db, correlation_ids, materializer=self._graph_materializer
         )
 
 

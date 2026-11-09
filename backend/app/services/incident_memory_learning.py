@@ -354,6 +354,22 @@ def _string_values(obj: Any, acc: list[str] | None = None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _default_query_service_factory(db: Any) -> IncidentMemoryQueryService:
+    """Build the real, stateless query service for a caller-owned ``db``.
+
+    :class:`IncidentMemoryQueryService` is stateless: the caller-owned ``db``
+    is passed to each query *method* (``list_memories``/``get_memory``/…),
+    never to its constructor, whose first parameter is instead a *repository*
+    factory.  Passing ``db`` positionally to the class — the previous default —
+    stored the session as the repository factory and later invoked it as
+    ``db(db)``.  This factory therefore ignores ``db`` and returns a
+    default-constructed service, whose own default repository factory maps the
+    session to :class:`IncidentMemoryRepository` on every call.
+    """
+    del db  # caller-owned session is threaded per method, never held here
+    return IncidentMemoryQueryService()
+
+
 class IncidentMemoryLearningService:
     """Deterministic, read-only consolidation of persisted incident memories.
 
@@ -366,18 +382,20 @@ class IncidentMemoryLearningService:
     Args:
         query_service_factory: Optional factory mapping a caller-owned DB
             connection/context object to an
-            :class:`IncidentMemoryQueryService`; defaults to the real query
-            service.  Injected for testability — tests may supply a fake
-            query service, but it must still be an
-            :class:`IncidentMemoryQueryService` instance so the boundary can
-            never be widened.
+            :class:`IncidentMemoryQueryService`; defaults to
+            :func:`_default_query_service_factory`, which returns the real,
+            stateless query service (the caller-owned ``db`` is threaded to
+            each query *method*, not to the constructor).  Injected for
+            testability — tests may supply a fake query service, but it must
+            still be an :class:`IncidentMemoryQueryService` instance so the
+            boundary can never be widened.
     """
 
     def __init__(
         self,
         query_service_factory: Callable[
             [Any], IncidentMemoryQueryService
-        ] = IncidentMemoryQueryService,
+        ] = _default_query_service_factory,
     ) -> None:
         self._query_service_factory = query_service_factory
 

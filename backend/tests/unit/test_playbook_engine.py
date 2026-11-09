@@ -385,6 +385,9 @@ class TestGroundingAndSufficiency:
         assert result.playbook.actions == []
         assert result.metadata.max_depth == 0
         assert result.limitations
+        assert result.uncertainty.supporting_evidence_count == 0
+        assert result.uncertainty.contradicting_evidence_count == 0
+        assert result.current_state
 
     def test_insufficient_result_still_passes_structural_validation(self) -> None:
         """The zero-action contract fix: step ordering is still checked."""

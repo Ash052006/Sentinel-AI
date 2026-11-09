@@ -52,10 +52,13 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.models.approval_request import ApprovalRequestRow
 from app.repositories.approval import ApprovalRepository
@@ -231,11 +234,32 @@ class ApprovalService:
     def __init__(
         self,
         repository_factory: Callable[[Session], ApprovalRepository] = ApprovalRepository,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._repository_factory = repository_factory
+        self._graph_materializer = graph_materializer
 
     def _repo(self, db: Session) -> ApprovalRepository:
         return self._repository_factory(db)
+
+    def _refresh_correlation_graph(
+        self, db: Session, correlation_id: uuid.UUID | None
+    ) -> None:
+        """Best-effort refresh of the approval's correlation subgraph.
+
+        Called only after the approval row is durable.  Isolated by the shared
+        materializer, which logs and swallows any graph failure and never
+        raises, so it can never undo a recorded decision or execution.
+        """
+        if correlation_id is None:
+            return
+        from app.services.knowledge_graph.materialization import (
+            refresh_correlation_graphs,
+        )
+
+        refresh_correlation_graphs(
+            db, [correlation_id], materializer=self._graph_materializer
+        )
 
     @staticmethod
     def _now(clock: Callable[[], datetime]) -> datetime:
@@ -366,6 +390,7 @@ class ApprovalService:
             details=f"routed decision {row.policy_decision_id} for human approval",
             ip_address=ip_address,
         )
+        self._refresh_correlation_graph(db, row.correlation_id)
         return _to_record(row)
 
     def _get_existing_or_reconcile(
@@ -640,6 +665,7 @@ class ApprovalService:
             details=f"decision {claimed.policy_decision_id} resolved by a human",
             ip_address=ip_address,
         )
+        self._refresh_correlation_graph(db, claimed.correlation_id)
         return _to_record(claimed)
 
     def _execute_response(

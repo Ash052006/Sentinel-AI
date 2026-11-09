@@ -55,88 +55,132 @@ export function InvestigationsPage() {
         ) : (detections.data?.length ?? 0) === 0 && (correlations.data?.length ?? 0) === 0 ? (
           <EmptyState title="No current evidence" />
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Table>
-              <thead>
-                <tr className="border-b border-edge">
-                  <Th>Severity</Th>
-                  <Th>Rule</Th>
-                  <Th>Confidence</Th>
-                  <Th>Provenance</Th>
-                  <Th>Detected at</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge-soft">
-                {(detections.data ?? []).slice(0, 10).map((item) => (
-                  <TRow key={item.id}>
-                    <Td>
-                      <SeverityBadge severity={item.severity} />
-                    </Td>
-                    <Td data-mono className="text-[11px] text-ink">{item.rule_id}</Td>
-                    <Td>
-                      <ConfidenceBar value={item.confidence} />
-                    </Td>
-                    <Td>
-                      <ProvenanceBadge provenance={item.provenance} />
-                    </Td>
-                    <Td className="text-xs text-ink-dim">{formatTimestamp(item.detected_at)}</Td>
-                  </TRow>
-                ))}
-              </tbody>
-            </Table>
+          (() => {
+            const recentDetections = (detections.data ?? []).slice(0, 10)
+            const recentCorrelations = (correlations.data ?? []).slice(0, 10)
+            const rowCount = Math.max(recentDetections.length, recentCorrelations.length)
+            const rowIndices = Array.from({ length: rowCount }, (_, i) => i)
 
-            <Table>
-              <thead>
-                <tr className="border-b border-edge">
-                  <Th>Status</Th>
-                  <Th>Members</Th>
-                  <Th>Confidence</Th>
-                  <Th>Provenance</Th>
-                  <Th>Established</Th>
-                  <Th>Explain</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge-soft">
-                {(correlations.data ?? []).slice(0, 10).map((item) => (
-                  <TRow key={item.id}>
-                    <Td>
-                      <CorrelationStatusBadge status={item.status} />
-                    </Td>
-                    <Td>{item.members.length}</Td>
-                    <Td>
-                      <ConfidenceBar value={item.confidence} />
-                    </Td>
-                    <Td>
-                      <ProvenanceBadge provenance={item.provenance} />
-                    </Td>
-                    <MonoCell>
-                      <Link
-                        to={`/incidents/${item.correlation_id}`}
-                        className="text-accent hover:underline"
-                      >
-                        open
-                      </Link>
-                    </MonoCell>
-                    <Td>
-                      <Button
-                        variant={
-                          selectedCorrelationId === item.correlation_id
-                            ? 'default'
-                            : 'outline'
-                        }
-                        size="sm"
-                        onClick={() =>
-                          setSelectedCorrelationId(item.correlation_id)
-                        }
-                      >
-                        Explain
-                      </Button>
-                    </Td>
-                  </TRow>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+            return (
+              <Table>
+                <thead>
+                  <tr className="border-b border-edge bg-surface-2/40">
+                    <th
+                      colSpan={5}
+                      className="border-r border-edge/60 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-dim"
+                    >
+                      Detections
+                    </th>
+                    <th
+                      colSpan={6}
+                      className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-dim"
+                    >
+                      Correlations
+                    </th>
+                  </tr>
+                  <tr className="border-b border-edge">
+                    <Th>Severity</Th>
+                    <Th>Rule</Th>
+                    <Th>Confidence</Th>
+                    <Th>Provenance</Th>
+                    <Th className="border-r border-edge/60">Detected at</Th>
+                    <Th>Status</Th>
+                    <Th>Members</Th>
+                    <Th>Confidence</Th>
+                    <Th>Provenance</Th>
+                    <Th>Established</Th>
+                    <Th>Explain</Th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-edge-soft">
+                  {rowIndices.map((i) => {
+                    const det = recentDetections[i]
+                    const corr = recentCorrelations[i]
+                    const rowKey = `${det?.id ?? `no-det-${i}`}-${corr?.id ?? `no-corr-${i}`}`
+
+                    return (
+                      <TRow key={rowKey}>
+                        {det ? (
+                          <>
+                            <Td>
+                              <SeverityBadge severity={det.severity} />
+                            </Td>
+                            <Td>
+                              <MonoId id={det.rule_id} />
+                            </Td>
+                            <Td>
+                              <ConfidenceBar value={det.confidence} />
+                            </Td>
+                            <Td>
+                              <ProvenanceBadge provenance={det.provenance} />
+                            </Td>
+                            <Td className="whitespace-nowrap border-r border-edge/60 text-xs text-ink-dim">
+                              {formatTimestamp(det.detected_at)}
+                            </Td>
+                          </>
+                        ) : (
+                          <>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="border-r border-edge/60 text-ink-faint">—</Td>
+                          </>
+                        )}
+
+                        {corr ? (
+                          <>
+                            <Td>
+                              <CorrelationStatusBadge status={corr.status} />
+                            </Td>
+                            <Td>{corr.members.length}</Td>
+                            <Td>
+                              <ConfidenceBar value={corr.confidence} />
+                            </Td>
+                            <Td>
+                              <ProvenanceBadge provenance={corr.provenance} />
+                            </Td>
+                            <MonoCell>
+                              <Link
+                                to={`/incidents/${corr.correlation_id}`}
+                                className="text-accent hover:underline"
+                              >
+                                open
+                              </Link>
+                            </MonoCell>
+                            <Td>
+                              <Button
+                                variant={
+                                  selectedCorrelationId === corr.correlation_id
+                                    ? 'default'
+                                    : 'outline'
+                                }
+                                size="sm"
+                                onClick={() =>
+                                  setSelectedCorrelationId(corr.correlation_id)
+                                }
+                              >
+                                Explain
+                              </Button>
+                            </Td>
+                          </>
+                        ) : (
+                          <>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                            <Td className="text-ink-faint">—</Td>
+                          </>
+                        )}
+                      </TRow>
+                    )
+                  })}
+                </tbody>
+              </Table>
+            )
+          })()
         )}
       </Panel>
 

@@ -89,6 +89,8 @@ def _isolate_test_database() -> str:
                 returncode=4,
             )
     os.environ["DATABASE_URL"] = url
+    if not os.environ.get("JWT_SECRET"):
+        os.environ["JWT_SECRET"] = "test-jwt-secret-key-for-unit-tests-min-32-bytes"
     return url
 
 
@@ -212,6 +214,53 @@ def db_session():
         yield session
     finally:
         session.close()
+
+
+@pytest.fixture(autouse=True)
+def _ti_doc_ips_for_legacy_tests(request, monkeypatch):
+    """Explicit test-only configuration allowing RFC 5737/3849 test addresses
+    in legacy offline test suites that mock provider responses."""
+    if any(
+        target in request.node.nodeid
+        for target in (
+            "test_threat_intelligence_agent",
+            "test_threat_intel_graph_refresh",
+            "test_threat_intelligence_persistence_integration",
+        )
+    ):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "threat_intel_allow_documentation_ips", True)
+
+
+@pytest.fixture(autouse=True)
+def _disable_auto_graph_materialization(request, monkeypatch):
+    """Keep the automatic graph hooks inert across the shared test suite.
+
+    ``CorrelationPersistenceService`` (and the risk / incident-memory /
+    approval / SOAR / report / hunt writers) refresh a correlation's knowledge
+    graph after committing.  The broad suite persists those records only as
+    setup/evidence, so a real materialization would write graph rows into the
+    shared test database as a side effect and skew graph-sensitive suites.
+    Both the correlation wrapper and the shared default hook are neutralized;
+    the hooks themselves are covered by the dedicated, fixture-independent
+    tests.
+    """
+    if "test_threat_intel_graph_refresh" in request.node.nodeid:
+        return
+
+    from app.services import correlation_persistence
+    from app.services.knowledge_graph import materialization
+
+    monkeypatch.setattr(
+        correlation_persistence,
+        "_materialize_correlation_graph",
+        lambda _db, _correlation_id: None,
+    )
+    monkeypatch.setattr(
+        materialization,
+        "materialize_correlation_graph",
+        lambda _db, _correlation_id: None,
+    )
 
 
 @pytest.fixture(scope="session")

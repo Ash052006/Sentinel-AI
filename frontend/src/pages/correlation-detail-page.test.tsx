@@ -139,4 +139,26 @@ describe('CorrelationDetailPage — shared-event grouping (P0-1)', () => {
     // The debate must be scoped to this correlation, not left to a bare route.
     expect(link).toHaveAttribute('href', `/debates/correlation/${CORR}`)
   })
+
+  it('offers the prediction workflow scoped to this correlation', async () => {
+    const members = Array.from({ length: 7 }, (_, i) => member(i, SHARED_EVENT))
+    vi.mocked(correlationsApi.get).mockResolvedValue(correlation(members) as never)
+
+    renderDetail()
+
+    const link = await screen.findByRole('link', { name: /^predictions$/i })
+    // The prediction page runs the real POST for the correlation in the route.
+    expect(link).toHaveAttribute('href', `/predictions/correlation/${CORR}`)
+  })
+
+  it('offers the response playbook proposal workflow scoped to this correlation', async () => {
+    const members = Array.from({ length: 7 }, (_, i) => member(i, SHARED_EVENT))
+    vi.mocked(correlationsApi.get).mockResolvedValue(correlation(members) as never)
+
+    renderDetail()
+
+    const link = await screen.findByRole('link', { name: /^response playbook$/i })
+    // The playbook page runs the existing proposal-only API for this correlation.
+    expect(link).toHaveAttribute('href', `/playbooks/correlation/${CORR}`)
+  })
 })

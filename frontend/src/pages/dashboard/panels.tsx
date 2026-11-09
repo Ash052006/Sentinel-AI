@@ -275,7 +275,7 @@ export function SecurityActivityPanel({
   return (
     <Panel
       title="Security activity"
-      subtitle="Detection, correlation and risk activity over time · bucketed from bounded recent feeds (limit 200 each)"
+      subtitle="Detection, correlation and risk activity over time · local time · bucketed from bounded recent feeds (limit 200 each)"
       className={cn('xl:col-span-8', className)}
       padded={false}
       action={
@@ -330,17 +330,17 @@ export function SecurityActivityPanel({
             <ActivityBars data={series} />
           </div>
           <div className="border-t border-edge-soft px-4 py-1.5 text-right text-[10px] text-ink-faint">
-            {nonEmpty} distinct time buckets in the {WINDOW_LABEL[window]} window
+            {nonEmpty === 1
+              ? `All observed activity landed in a single ${humanizeSpan(BUCKET_MS[window])} bucket in the ${WINDOW_LABEL[window]} window`
+              : `${nonEmpty} distinct time buckets in the ${WINDOW_LABEL[window]} window`}
           </div>
         </>
       ) : (
         <div data-testid="insufficient-data" className="flex flex-col gap-2 p-4 text-center">
           <div className="text-xs font-medium text-ink-dim">Insufficient historical data</div>
           <div className="mx-auto max-w-lg text-[11px] leading-relaxed text-ink-faint">
-            The {WINDOW_LABEL[window]} window contains only{' '}
-            {nonEmpty} distinct time bucket{nonEmpty === 1 ? '' : 's'} from the bounded feeds — not
-            enough to draw a meaningful series. Below is the full observed sample bucketed by day
-            instead, sorted chronologically.
+            The {WINDOW_LABEL[window]} window contains no activity from the bounded feeds. Below is
+            the full observed sample bucketed by day instead, sorted chronologically.
           </div>
           {daily.length > 1 ? (
             <>

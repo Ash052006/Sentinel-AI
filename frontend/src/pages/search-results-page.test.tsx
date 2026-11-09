@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { SearchResultsPage } from './search-results-page'
 import { renderWithProviders } from '../test/utils'
+import { ApiError } from '../api/client'
 
 vi.mock('../api/soc', () => ({
   socApi: {
@@ -166,5 +167,50 @@ describe('SearchResultsPage', () => {
     expect(suggestions).toMatch(/recent correlations/i)
     // risk_level is a real filter, but only on risk assessments.
     expect(suggestions).toMatch(/critical risk assessments/i)
+  })
+
+  it('renders a plain string error as its message', async () => {
+    vi.mocked(socApi.socApi.query).mockRejectedValue('gateway timeout')
+
+    renderWithProviders(<SearchResultsPage />, { entries: ['/?q=recent detections'] })
+
+    expect(await screen.findByText('gateway timeout')).toBeInTheDocument()
+  })
+
+  it('renders an ApiError detail without the class-name prefix', async () => {
+    vi.mocked(socApi.socApi.query).mockRejectedValue(
+      new ApiError(503, 'soc querier unavailable'),
+    )
+
+    renderWithProviders(<SearchResultsPage />, { entries: ['/?q=recent detections'] })
+
+    expect(await screen.findByText('soc querier unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/ApiError:/)).not.toBeInTheDocument()
+  })
+
+  it('extracts the human-readable detail from a structured error', async () => {
+    vi.mocked(socApi.socApi.query).mockRejectedValue({ detail: 'resource not found' })
+
+    renderWithProviders(<SearchResultsPage />, { entries: ['/?q=recent detections'] })
+
+    expect(await screen.findByText('resource not found')).toBeInTheDocument()
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
+  })
+
+  it('falls back instead of rendering [object Object] for an unexpected error shape', async () => {
+    vi.mocked(socApi.socApi.query).mockRejectedValue({ unexpected: true })
+
+    renderWithProviders(<SearchResultsPage />, { entries: ['/?q=recent detections'] })
+
+    expect(await screen.findByText(/did not return an answer/i)).toBeInTheDocument()
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
+  })
+
+  it('renders a safe fallback when the rejection carries no error value', async () => {
+    vi.mocked(socApi.socApi.query).mockRejectedValue(null)
+
+    renderWithProviders(<SearchResultsPage />, { entries: ['/?q=recent detections'] })
+
+    expect(await screen.findByText(/did not return an answer/i)).toBeInTheDocument()
   })
 })

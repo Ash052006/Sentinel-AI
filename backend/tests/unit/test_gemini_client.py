@@ -288,6 +288,64 @@ def test_rate_limit_without_retry_after():
     assert sleeps == [1.0]
 
 
+def test_daily_quota_is_terminal_and_reports_provider_retry_delay():
+    """A per-day quota cannot recover inside the retry budget.
+
+    Google reports it as HTTP 429 but includes a QuotaFailure and often a
+    multi-hour RetryInfo delay. Retrying it once per agent multiplies latency
+    and still fails, so the client must report it immediately with the
+    provider's own delay.
+    """
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def daily_quota(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": 429,
+                    "status": "RESOURCE_EXHAUSTED",
+                    "message": "You exceeded your current quota.",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [
+                                {
+                                    "quotaId": (
+                                        "GenerateRequestsPerDayPerProject"
+                                        "PerModel-FreeTier"
+                                    ),
+                                    "description": (
+                                        "Generate content requests per day "
+                                        "limit exceeded on Free Tier."
+                                    ),
+                                }
+                            ],
+                        },
+                        {
+                            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                            "retryDelay": "79916s",
+                        },
+                    ],
+                }
+            },
+            request=request,
+        )
+
+    client = _client(daily_quota, sleeps=sleeps, max_retries=4)
+    with pytest.raises(InvestigationProviderUnavailableError) as excinfo:
+        client.generate(_prompt())
+
+    assert attempts["n"] == 1
+    assert sleeps == []
+    assert excinfo.value.retry_after == 79916.0
+    message = str(excinfo.value)
+    assert "daily request quota exhausted" in message
+    assert _API_KEY not in message
+
+
 def test_rate_limit_recovers_on_retry():
     attempts = {"n": 0}
     sleeps: list[float] = []

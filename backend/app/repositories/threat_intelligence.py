@@ -137,10 +137,28 @@ class ThreatIntelRepository:
     # Lookups
     # ------------------------------------------------------------------
 
-    def find_existing_lookup(
+    def find_event_lookup(
         self,
         *,
         event_id: uuid.UUID,
+        indicator_id: uuid.UUID,
+        provider: str,
+    ) -> ThreatIntelLookup | None:
+        """Return the authoritative event lookup row for (event_id, indicator_id, provider)."""
+        return self.db.scalar(
+            select(ThreatIntelLookup).where(
+                ThreatIntelLookup.event_id == event_id,
+                ThreatIntelLookup.indicator_id == indicator_id,
+                ThreatIntelLookup.provider == provider,
+                ThreatIntelLookup.origin == "event",
+            )
+        )
+
+    def find_existing_lookup(
+        self,
+        *,
+        event_id: uuid.UUID | None = None,
+        origin: str | None = None,
         indicator_id: uuid.UUID,
         provider: str,
         status: LookupStatus | None = None,
@@ -165,10 +183,15 @@ class ThreatIntelRepository:
         Only the attributes that are not ``None`` participate in the match.
         """
         conditions = [
-            ThreatIntelLookup.event_id == event_id,
             ThreatIntelLookup.indicator_id == indicator_id,
             ThreatIntelLookup.provider == provider,
         ]
+        if event_id is None:
+            conditions.append(ThreatIntelLookup.event_id.is_(None))
+        else:
+            conditions.append(ThreatIntelLookup.event_id == event_id)
+        if origin is not None:
+            conditions.append(ThreatIntelLookup.origin == origin)
         if status is not None:
             conditions.append(ThreatIntelLookup.status == status)
         if performed_at is not None:

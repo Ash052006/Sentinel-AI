@@ -46,9 +46,12 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.models.incident_memory import IncidentMemoryRow
 from app.repositories.incident_memory import IncidentMemoryRepository
@@ -223,6 +226,9 @@ class IncidentMemoryPersistenceService:
             ``updated_at`` bookkeeping on persistence, and injected for
             deterministic tests.  Parity with the correlation persistence
             service.
+        graph_materializer: Optional post-commit hook used to refresh the
+            affected correlation subgraphs.  Defaults to the shared
+            knowledge-graph materializer.  Injected for testability.
     """
 
     def __init__(
@@ -231,9 +237,11 @@ class IncidentMemoryPersistenceService:
             [Session], IncidentMemoryRepository
         ] = IncidentMemoryRepository,
         clock: Callable[[], datetime] | None = None,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._repository_factory = repository_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._graph_materializer = graph_materializer
 
     # ------------------------------------------------------------------
     # Public API
@@ -279,6 +287,7 @@ class IncidentMemoryPersistenceService:
     ) -> IncidentMemoryPersistenceSummary:
         repository = self._repository_factory(db)
         memory_ids: list[uuid.UUID] = []
+        correlation_ids: list[uuid.UUID] = []
         created = 0
         skipped = 0
 
@@ -348,9 +357,24 @@ class IncidentMemoryPersistenceService:
                     provenance=Provenance.RECALLED.value,
                 )
             )
+            if item.correlation_id is not None:
+                correlation_ids.append(item.correlation_id)
             created += 1
 
         db.commit()
+
+        # The memories are durable; refresh each affected correlation's graph so
+        # the new RECALLED_BY evidence becomes visible.  Fully isolated by the
+        # shared materializer, which never raises for a graph failure.
+        if correlation_ids:
+            from app.services.knowledge_graph.materialization import (
+                refresh_correlation_graphs,
+            )
+
+            refresh_correlation_graphs(
+                db, correlation_ids, materializer=self._graph_materializer
+            )
+
         return IncidentMemoryPersistenceSummary(
             memory_ids=tuple(memory_ids),
             memories_created=created,

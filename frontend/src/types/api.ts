@@ -962,7 +962,8 @@ export type LookupStatusLabel =
 export interface ThreatIntelLookupRecord {
   lookup_id: string
   indicator_id: string
-  event_id: string
+  event_id: string | null
+  origin?: string
   provider: string
   status: LookupStatus
   status_label: LookupStatusLabel
@@ -1023,6 +1024,37 @@ export interface ThreatIntelIndicatorEvents {
   truncated: boolean
   read_only: boolean
   note: string
+}
+
+export interface ManualLookupRequest {
+  indicator: string
+  indicator_type: IndicatorType
+}
+
+export interface ManualProviderResult {
+  provider: string
+  status: 'success' | 'error' | 'skipped'
+  found?: boolean | null
+  confidence?: number | null
+  evidence?: Record<string, unknown> | null
+  error_message?: string | null
+  performed_at: string
+}
+
+export interface ManualLookupResponse {
+  indicator_id: string
+  indicator_type: IndicatorType
+  normalized_indicator_value: string
+  canonical_key: string
+  status: string
+  providers_attempted: number
+  providers_succeeded: number
+  providers_failed: number
+  providers_skipped: number
+  is_new_indicator: boolean
+  first_seen?: string | null
+  last_seen?: string | null
+  results: ManualProviderResult[]
 }
 
 // ---------------------------------------------------------------------------
@@ -1482,6 +1514,8 @@ export interface PredictionResult {
   metadata: PredictionMetadata
   limitations: PredictionLimitation[]
   limitations_note: string
+  /** When the persisted session was recorded; absent before persistence. */
+  created_at?: string | null
   provenance: 'ai_generated'
 }
 
@@ -1591,4 +1625,342 @@ export interface ExplainabilityResult {
 
 export interface ExplanationRequest {
   use_ai: boolean
+}
+
+/* ------------------------------------------------------------------------- *
+ * V3.25 — AI Playbook Generation Engine
+ * ------------------------------------------------------------------------- *
+ *
+ * A playbook is a *proposal*, never an approval and never an execution.  Every
+ * model below types `provenance` as `'ai_generated'`, and the only lifecycles a
+ * generation can produce are `proposed` and `approval_required`, so the type
+ * system prevents a proposal from ever being rendered as an executed response.
+ *
+ * A failure never becomes a playbook: it arrives as `PlaybookFailure`, never as
+ * a `PlaybookResult`.
+ */
+
+export type PlaybookStatus = 'proposed' | 'insufficient_evidence' | 'contested'
+
+export type PlaybookLifecycle =
+  | 'draft'
+  | 'proposed'
+  | 'approval_required'
+  | 'approved'
+  | 'rejected'
+  | 'executing'
+  | 'executed'
+  | 'verification_required'
+  | 'verified'
+  | 'failed'
+  | 'cancelled'
+
+export type ActionPriority = 'immediate' | 'high' | 'medium' | 'low'
+
+export type ActionCategory =
+  | 'investigation'
+  | 'containment'
+  | 'prevention'
+  | 'eradication'
+  | 'recovery'
+  | 'verification'
+
+export type ApprovalRequirement =
+  | 'no_approval'
+  | 'approval_required'
+  | 'not_executable'
+
+export type GroundingBasis =
+  | 'established_evidence'
+  | 'prediction_supported'
+  | 'both'
+
+export type PlaybookEvidenceSource =
+  | 'event'
+  | 'detection'
+  | 'correlation'
+  | 'risk_assessment'
+  | 'investigation'
+  | 'threat_intelligence'
+  | 'incident_memory'
+  | 'attack_path'
+  | 'debate_claim'
+  | 'prediction'
+
+export type CapabilityStatus = 'available' | 'unavailable'
+
+export type ExecutionBackend = 'mock_sandbox' | 'none'
+
+export type PlaybookTargetType =
+  | 'ip'
+  | 'domain'
+  | 'url'
+  | 'file'
+  | 'process'
+  | 'endpoint'
+  | 'user'
+  | 'account'
+  | 'token'
+  | 'credential'
+  | 'network'
+  | 'correlation'
+  | 'incident'
+
+export type DependencyKind =
+  | 'evidence_first'
+  | 'containment_before_verification'
+  | 'target_discovery'
+
+export type PlaybookLimitationKind =
+  | 'no_resolvable_target'
+  | 'no_established_evidence'
+  | 'capability_unavailable'
+  | 'capability_simulated_only'
+  | 'debate_absent'
+  | 'debate_partial_consensus'
+  | 'debate_contested'
+  | 'debate_graph_snapshot_mismatch'
+  | 'prediction_absent'
+  | 'prediction_insufficient'
+  | 'containment_limited_to_evidence'
+  | 'horizon_capped'
+  | 'graph_truncated'
+  | 'input_source_unavailable'
+  | 'no_attack_mapping'
+  | 'untrusted_content_quarantined'
+  | 'model_candidates_rejected'
+  | 'no_rollback_available'
+
+export type PlaybookConfidenceComponent =
+  | 'evidence_support'
+  | 'target_certainty'
+  | 'prediction_support'
+  | 'debate_agreement'
+  | 'capability_availability'
+  | 'contradiction_penalty'
+  | 'evidence_gap_penalty'
+
+export type ActionConfidenceBand = 'very_low' | 'low' | 'moderate' | 'high'
+
+export type PlaybookActionType =
+  | 'collect_artifact'
+  | 'collect_memory'
+  | 'collect_network_capture'
+  | 'increase_logging'
+  | 'search_indicator'
+  | 'scan_endpoint'
+  | 'scan_file'
+  | 'add_detection_rule'
+  | 'block_ip'
+  | 'block_domain'
+  | 'block_url'
+  | 'quarantine_file'
+  | 'isolate_endpoint'
+  | 'disable_account'
+  | 'revoke_session'
+  | 'revoke_token'
+  | 'rotate_credential'
+  | 'reset_credential'
+  | 'kill_process'
+  | 'disable_persistence'
+  | 'remove_persistence'
+  | 'verify_containment'
+  | 'restore_endpoint'
+  | 'unblock_ip'
+  | 'reenable_account'
+
+export interface PlaybookEvidence {
+  source: PlaybookEvidenceSource
+  reference: string
+  stance: EvidenceStance
+  detail: string
+}
+
+export interface PlaybookRationale {
+  summary: string
+  grounding: GroundingBasis
+  grounding_detail: string
+  priority_reason: string
+  prediction_reference: string | null
+  debate_reference: string | null
+  provenance: Provenance
+}
+
+export interface PlaybookDependency {
+  depends_on_action_id: string
+  kind: DependencyKind
+  reason: string
+}
+
+export interface PlaybookRollback {
+  rollback_supported: boolean
+  rollback_action: PlaybookActionType | null
+  reason: string
+}
+
+export interface PlaybookActionApproval {
+  requirement: ApprovalRequirement
+  reason: string
+  authorized_roles: string[]
+  provenance: Provenance
+}
+
+export interface PlaybookAction {
+  action_id: string
+  action: PlaybookActionType
+  category: ActionCategory
+  target_type: PlaybookTargetType
+  target_reference: string
+  target_basis: string
+  capability: CapabilityStatus
+  execution_backend: ExecutionBackend
+  approval: PlaybookActionApproval
+  rollback: PlaybookRollback
+  risk_level: 'low' | 'medium' | 'high'
+  expected_outcome: string
+  verification_required: boolean
+  verification_method: string | null
+  priority: ActionPriority
+  confidence: number
+  confidence_band: ActionConfidenceBand
+  confidence_basis: Record<PlaybookConfidenceComponent, number>
+  evidence: PlaybookEvidence[]
+  rationale: PlaybookRationale
+  prerequisites: string[]
+  depends_on: PlaybookDependency[]
+  provenance: Provenance
+}
+
+export interface PlaybookStep {
+  step_number: number
+  name: string
+  purpose: string
+  actions: PlaybookAction[]
+  depends_on_steps: number[]
+}
+
+export interface PlaybookLimitation {
+  kind: PlaybookLimitationKind
+  detail: string
+}
+
+export interface PlaybookUncertainty {
+  confidence: number
+  confidence_band: ActionConfidenceBand
+  confidence_basis: Record<PlaybookConfidenceComponent, number>
+  supporting_evidence_count: number
+  contradicting_evidence_count: number
+  evidence_gaps: string[]
+  unresolved_questions: string[]
+  conflicting_claims: string[]
+  provenance: Provenance
+}
+
+export interface PlaybookMetadata {
+  engine_version: string
+  playbook_configuration_digest: string
+  graph_snapshot_digest: string
+  /** Identifies the *consumed* V3.23 debate, not a call this engine made. */
+  debate_id: string | null
+  debate_consensus_state: string | null
+  /** Identifies the *consumed* V3.24 prediction, not a call this engine made. */
+  prediction_session_id: string | null
+  prediction_status: string | null
+  prediction_count: number
+  graph_node_count: number
+  graph_edge_count: number
+  target_count: number
+  max_depth: number
+  candidate_provider: string | null
+  candidate_model: string | null
+  candidate_proposed_count: number
+  candidate_accepted_count: number
+  candidate_rejected_count: number
+  unavailable_inputs: Record<string, string>
+  limitations: PlaybookLimitation[]
+  provenance: Provenance
+}
+
+export interface Playbook {
+  playbook_id: string
+  correlation_id: string
+  status: PlaybookStatus
+  lifecycle: PlaybookLifecycle
+  steps: PlaybookStep[]
+  limitations: PlaybookLimitation[]
+  provenance: Provenance
+}
+
+export interface PlaybookResult {
+  playbook_id: string
+  correlation_id: string
+  status: PlaybookStatus
+  lifecycle: PlaybookLifecycle
+  playbook: Playbook
+  uncertainty: PlaybookUncertainty
+  current_state: PlaybookEvidence[]
+  metadata: PlaybookMetadata
+  limitations: PlaybookLimitation[]
+  execution_note: string
+  provenance: Provenance
+}
+
+export interface PlaybookSummary {
+  playbook_id: string
+  correlation_id: string
+  status: PlaybookStatus
+  lifecycle: PlaybookLifecycle
+  action_count: number
+  step_count: number
+  approval_required_count: number
+  not_executable_count: number
+  confidence: number
+  prediction_session_id: string | null
+  provenance: Provenance
+}
+
+export interface PlaybookListResult {
+  correlation_id: string
+  playbooks: PlaybookSummary[]
+  provenance: Provenance
+}
+
+export interface PlaybookValidationResult {
+  playbook_id: string
+  correlation_id: string
+  valid: boolean
+  status: PlaybookStatus
+  lifecycle: PlaybookLifecycle
+  action_count: number
+  executed: boolean
+  note: string
+}
+
+/**
+ * Governed failure body.  A failure never becomes a playbook: it carries a code
+ * and a detail instead of a result, exactly as the debate and prediction
+ * engines do.
+ */
+export interface PlaybookFailure {
+  correlation_id: string | null
+  playbook_id: string | null
+  status: 'failed'
+  failure_code: string
+  detail: string
+  provenance: Provenance
+}
+
+/* ------------------------------------------------------------------------- *
+ * V3.26 — Digital Twin
+ * ------------------------------------------------------------------------- *
+ *
+ * The only Digital Twin surface the backend exposes today is a health probe.
+ * The functional twin API (snapshots, simulation, state) is not implemented on
+ * the server yet, so the client types only what actually exists rather than
+ * inventing a contract the backend cannot satisfy.
+ */
+
+export interface DigitalTwinHealth {
+  status: string
+  module: string
 }

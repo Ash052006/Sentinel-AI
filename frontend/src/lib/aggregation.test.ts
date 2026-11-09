@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import {
   BUCKET_MS,
   buildActivitySeries,
@@ -8,6 +8,14 @@ import {
   seriesTotals,
   toTimestamp,
 } from './aggregation'
+
+// These cases were written against UTC bucket labels. Bucketing is now local
+// by design, so pin UTC here and leave the Asia/Kolkata expectations to
+// `aggregation.timezone.test.ts`.
+vi.stubEnv('TZ', 'UTC')
+afterAll(() => {
+  vi.unstubAllEnvs()
+})
 
 const parse = (iso: string) => new Date(iso).getTime()
 
@@ -70,14 +78,22 @@ describe('aggregation', () => {
     expect(total).toBe(1)
   })
 
-  it('reports sufficient data only when at least two non-empty buckets exist', () => {
+  it('treats a single non-empty bucket as drawable and nothing as insufficient', () => {
     const single = buildActivitySeries(
       { detections: ['2026-01-01T09:00:00Z'] },
       '24h',
       parse('2026-01-02T00:00:00Z'),
     )
     expect(nonEmptyBuckets(single)).toBe(1)
-    expect(hasSufficientSeries(single)).toBe(false)
+    expect(hasSufficientSeries(single)).toBe(true)
+
+    const empty = buildActivitySeries(
+      { detections: ['2025-12-31T09:00:00Z'] },
+      '24h',
+      parse('2026-01-02T00:00:00Z'),
+    )
+    expect(nonEmptyBuckets(empty)).toBe(0)
+    expect(hasSufficientSeries(empty)).toBe(false)
 
     const multi = buildActivitySeries(
       { detections: ['2026-01-01T09:00:00Z', '2026-12-31T09:00:00Z'] },
@@ -85,7 +101,7 @@ describe('aggregation', () => {
       parse('2026-12-31T23:00:00Z'),
     )
     // second timestamp is inside the 30d window (bucket ~30 Dec), first is far outside.
-    expect(hasSufficientSeries(multi)).toBe(false)
+    expect(hasSufficientSeries(multi)).toBe(true)
   })
 
   it('builds chronological daily fallback buckets with real gaps preserved', () => {

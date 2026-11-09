@@ -60,6 +60,41 @@ export function toTimestamp(value: string | number | null | undefined): number |
   return Number.isNaN(ms) ? null : ms
 }
 
+/**
+ * The machine's offset from UTC at a given instant, in milliseconds.
+ *
+ * ``getTimezoneOffset`` returns ``UTC - local`` in minutes, so negating it
+ * yields the value that shifts a real epoch timestamp into a "local wall
+ * clock encoded as epoch" space.  Reading the offset at the timestamp itself
+ * keeps the result correct across DST changes.
+ */
+function localOffsetMs(ms: number): number {
+  return -new Date(ms).getTimezoneOffset() * 60_000
+}
+
+/**
+ * Start of the bucket containing *ms*, aligned to the browser's local wall
+ * clock.  Stored/transmitted timestamps stay UTC; only the bucketing boundary
+ * is local so an "18:00" bucket means 18:00 where the operator is sitting.
+ */
+function localBucketStart(ms: number, spanMs: number): number {
+  const offset = localOffsetMs(ms)
+  const localMs = ms + offset
+  const localStart =
+    spanMs >= DAY_MS
+      ? Math.floor(localMs / DAY_MS / Math.round(spanMs / DAY_MS)) *
+        Math.round(spanMs / DAY_MS) *
+        DAY_MS
+      : Math.floor(localMs / spanMs) * spanMs
+  return localStart - offset
+}
+
+/** Start of the browser-local calendar day containing *ms*. */
+function localDayStart(ms: number): number {
+  const offset = localOffsetMs(ms)
+  return Math.floor((ms + offset) / DAY_MS) * DAY_MS - offset
+}
+
 export interface ActivityBucket {
   key: number
   label: string
@@ -70,8 +105,8 @@ export interface ActivityBucket {
 
 function bucketLabel(ms: number, spanMs: number): string {
   const date = new Date(ms)
-  if (spanMs >= DAY_MS) return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`
-  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`
+  if (spanMs >= DAY_MS) return `${date.getDate()} ${MONTHS[date.getMonth()]}`
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
 function parseSeries(values: SeriesInput['detections']): number[] {
@@ -89,6 +124,10 @@ function parseSeries(values: SeriesInput['detections']): number[] {
  * the trailing window `[now - WINDOW_MS, now]`. Empty buckets are included so
  * the x-axis reflects real gaps instead of a connected slope between distant
  * spikes.
+ *
+ * Bucket boundaries and labels are aligned to the browser's local timezone.
+ * Input timestamps remain UTC instants (the backend transmits them with a `Z`
+ * suffix); converting only at the display boundary avoids a second shift.
  */
 export function buildActivitySeries(
   input: SeriesInput,
@@ -102,7 +141,7 @@ export function buildActivitySeries(
 
   const bump = (ts: number, field: 'detections' | 'correlations' | 'risk') => {
     if (ts < cutoff || ts > now) return
-    const key = Math.floor(ts / span) * span
+    const key = localBucketStart(ts, span)
     const bucket = counts.get(key) ?? {
       key,
       label: bucketLabel(key, span),
@@ -119,7 +158,8 @@ export function buildActivitySeries(
   for (const ts of parseSeries(input.risk)) bump(ts, 'risk')
 
   const buckets: ActivityBucket[] = []
-  for (let key = Math.floor(cutoff / span) * span; key <= now; key += span) {
+  let key = localBucketStart(cutoff, span)
+  while (key <= now) {
     buckets.push(
       counts.get(key) ?? {
         key,
@@ -129,6 +169,8 @@ export function buildActivitySeries(
         risk: 0,
       },
     )
+    const next = localBucketStart(key + span, span)
+    key = next > key ? next : key + span
   }
   return buckets
 }
@@ -138,11 +180,15 @@ export function nonEmptyBuckets(series: ActivityBucket[]): number {
 }
 
 /**
- * A series needs at least two distinct non-empty time buckets to be a real
- * chronological series. A single spike is better reported honestly than drawn.
+ * A series is drawable as soon as at least one bucket holds activity.
+ *
+ * A single non-empty bucket is still real data: a demo/replay run writes every
+ * record within seconds, so sub-day windows legitimately collapse into one
+ * bucket. Drawing that one cluster (with an explicit label saying so) is more
+ * honest than hiding it behind an "insufficient data" notice.
  */
 export function hasSufficientSeries(series: ActivityBucket[]): boolean {
-  return nonEmptyBuckets(series) >= 2
+  return nonEmptyBuckets(series) >= 1
 }
 
 export interface DailyBucket {
@@ -155,8 +201,9 @@ export interface DailyBucket {
 
 /**
  * Fallback view used when a trailing window has insufficient diversity:
- * groups every loaded timestamp by UTC day across the full observed sample,
- * sorted chronologically. Always derived from the same real timestamps.
+ * groups every loaded timestamp by the browser-local calendar day across the
+ * full observed sample, sorted chronologically. Always derived from the same
+ * real UTC timestamps; only the day boundary and label are local.
  */
 export function buildDailyFallbackSeries(input: SeriesInput): DailyBucket[] {
   const detections = parseSeries(input.detections)
@@ -170,10 +217,10 @@ export function buildDailyFallbackSeries(input: SeriesInput): DailyBucket[] {
 
   const counts = new Map<number, DailyBucket>()
   const bump = (ts: number, field: 'detections' | 'correlations' | 'risk') => {
-    const key = Math.floor(ts / DAY_MS) * DAY_MS
+    const key = localDayStart(ts)
     const bucket = counts.get(key) ?? {
       key,
-      label: `${new Date(key).getUTCDate()} ${MONTHS[new Date(key).getUTCMonth()]}`,
+      label: bucketLabel(key, DAY_MS),
       detections: 0,
       correlations: 0,
       risk: 0,
@@ -187,16 +234,20 @@ export function buildDailyFallbackSeries(input: SeriesInput): DailyBucket[] {
   for (const ts of risk) bump(ts, 'risk')
 
   const buckets: DailyBucket[] = []
-  for (let key = Math.floor(min / DAY_MS) * DAY_MS; key <= max; key += DAY_MS) {
+  const end = localDayStart(max)
+  let key = localDayStart(min)
+  while (key <= end) {
     buckets.push(
       counts.get(key) ?? {
         key,
-        label: `${new Date(key).getUTCDate()} ${MONTHS[new Date(key).getUTCMonth()]}`,
+        label: bucketLabel(key, DAY_MS),
         detections: 0,
         correlations: 0,
         risk: 0,
       },
     )
+    const next = localDayStart(key + DAY_MS)
+    key = next > key ? next : key + DAY_MS
   }
   return buckets
 }

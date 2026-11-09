@@ -50,9 +50,12 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.models.risk_assessment import RiskAssessment
 from app.repositories.risk import RiskRepository
@@ -207,15 +210,20 @@ class RiskPersistenceService:
             ``timestamp`` comes from the Step 11A assessment itself, so the
             clock is unused by the current persistence path.  As with the
             correlation service, this is idempotency-neutral bookkeeping.
+        graph_materializer: Optional post-commit hook used to refresh the
+            assessment's correlation subgraph.  Defaults to the shared
+            knowledge-graph materializer.  Injected for testability.
     """
 
     def __init__(
         self,
         repository_factory: Callable[[Session], RiskRepository] = RiskRepository,
         clock: Callable[[], datetime] | None = None,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._repository_factory = repository_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._graph_materializer = graph_materializer
 
     def persist_assessment(
         self,
@@ -355,11 +363,30 @@ class RiskPersistenceService:
         db.flush()
         db.commit()
 
+        # The assessment is now durable; refresh its correlation's graph so the
+        # new ASSESSED_BY evidence becomes visible.  Fully isolated: the shared
+        # materializer logs and swallows any graph failure (see
+        # ``knowledge_graph.materialization``), so this can never undo or mask
+        # the successfully persisted assessment.
+        self._refresh_correlation_graph(db, assessment.correlation_id)
+
         return RiskPersistenceSummary(
             risk_assessment_id=risk_assessment_id,
             correlation_id=assessment.correlation_id,
             assessments_created=1,
             assessments_skipped=0,
+        )
+
+    def _refresh_correlation_graph(
+        self, db: Session, correlation_id: uuid.UUID
+    ) -> None:
+        """Best-effort refresh of the correlation subgraph after new evidence."""
+        from app.services.knowledge_graph.materialization import (
+            refresh_correlation_graphs,
+        )
+
+        refresh_correlation_graphs(
+            db, [correlation_id], materializer=self._graph_materializer
         )
 
 

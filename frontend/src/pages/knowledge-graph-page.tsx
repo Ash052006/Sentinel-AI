@@ -140,21 +140,46 @@ export function KnowledgeGraphPage() {
     if (isMissing(graphQuery.error)) {
       return (
         <div className="mx-auto max-w-7xl space-y-4">
-          <PageHeader title="Knowledge Graph" />
+          <PageHeader
+            title="Knowledge Graph"
+            description={correlationId ? `Correlation ${shortId(correlationId)}` : undefined}
+          >
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link to="/knowledge-graph">
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  All Correlations
+                </Link>
+              </Button>
+              <Button size="sm" onClick={() => void graphQuery.refetch()}>
+                Retry & Materialize Graph
+              </Button>
+            </div>
+          </PageHeader>
           <Panel>
             <NotAvailable
               title="No graph for this correlation"
-              body="The graph is derived only from persisted V2 rows, and this correlation has none derived yet. Run `app.cli build-knowledge-graph --correlation-id <id>` to materialize it."
+              body="The graph is derived only from persisted V2 rows, and this correlation has none derived yet. Sentinel AI can auto-materialize the graph once correlation detections are recorded."
             />
           </Panel>
         </div>
       )
     }
     return (
-      <ErrorState
-        message={String(graphQuery.error)}
-        onRetry={() => void graphQuery.refetch()}
-      />
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageHeader title="Knowledge Graph">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/knowledge-graph">
+              <ChevronLeft className="h-3.5 w-3.5" />
+              All Correlations
+            </Link>
+          </Button>
+        </PageHeader>
+        <ErrorState
+          message={String(graphQuery.error)}
+          onRetry={() => void graphQuery.refetch()}
+        />
+      </div>
     )
   }
 

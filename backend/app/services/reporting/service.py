@@ -25,9 +25,12 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.agents.investigation.exceptions import InvestigationAgentError
 from app.models.incident_report import IncidentReportRow
@@ -114,11 +117,13 @@ class IncidentReportService:
         repository_factory: Callable[
             [Session], IncidentReportRepository
         ] = IncidentReportRepository,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._generator_factory = generator_factory or (
             lambda: IncidentReportGenerator()
         )
         self._repository_factory = repository_factory
+        self._graph_materializer = graph_materializer
 
     # ------------------------------------------------------------------
     # Generation
@@ -152,7 +157,11 @@ class IncidentReportService:
             ip_address=None,
         )
 
-        marker = _ReportRowMarker(db, self._repository_factory(db))
+        marker = _ReportRowMarker(
+            db,
+            self._repository_factory(db),
+            graph_materializer=self._graph_materializer,
+        )
 
         try:
             # The provider is constructed here, *outside* the generator's own
@@ -302,10 +311,27 @@ class _ReportRowMarker:
     is committed only with a sanitized error and never a payload.
     """
 
-    def __init__(self, db: Session, repo: IncidentReportRepository) -> None:
+    def __init__(
+        self,
+        db: Session,
+        repo: IncidentReportRepository,
+        *,
+        graph_materializer: "GraphMaterializer | None" = None,
+    ) -> None:
         self.db = db
         self.repo = repo
+        self._graph_materializer = graph_materializer
         self._last_row: IncidentReportRow | None = None
+
+    def _refresh_correlation_graph(self, correlation_id: uuid.UUID) -> None:
+        """Best-effort refresh of the report's correlation subgraph."""
+        from app.services.knowledge_graph.materialization import (
+            refresh_correlation_graphs,
+        )
+
+        refresh_correlation_graphs(
+            self.db, [correlation_id], materializer=self._graph_materializer
+        )
 
     def persist_failed(
         self,
@@ -329,6 +355,11 @@ class _ReportRowMarker:
         self.db.commit()
         self.db.refresh(row)
         self._last_row = row
+        # The report is durable; refresh the correlation subgraph so the new
+        # REPORTED_BY evidence becomes visible.  Isolated: a graph failure is
+        # logged and swallowed by the shared materializer and can never undo
+        # the persisted report.
+        self._refresh_correlation_graph(correlation_id)
 
     def persist_generated(
         self,
@@ -353,6 +384,11 @@ class _ReportRowMarker:
         self.db.commit()
         self.db.refresh(row)
         self._last_row = row
+        # The report is durable; refresh the correlation subgraph so the new
+        # REPORTED_BY evidence becomes visible.  Isolated: a graph failure is
+        # logged and swallowed by the shared materializer and can never undo
+        # the persisted report.
+        self._refresh_correlation_graph(correlation_id)
 
     def last_row(self, missing_message: str) -> IncidentReportRow:
         """Return the row this marker last persisted; fail closed if lost."""

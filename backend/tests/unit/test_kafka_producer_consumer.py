@@ -172,3 +172,64 @@ class TestConsumerValidation:
         result = consumer.consume(timeout_ms=100)
         assert isinstance(result, SecurityEvent)
         assert result.event_id == event.event_id
+
+
+# ---------------------------------------------------------------------------
+# Consumer: record envelopes + manual commit
+# ---------------------------------------------------------------------------
+
+class TestConsumerRecords:
+    """The record-envelope API used by the ingestion worker."""
+
+    def _make_consumer_with_records(self, records) -> KafkaEventConsumer:
+        mock_consumer = MagicMock()
+        mock_consumer.poll.return_value = records
+        with patch("app.kafka.consumer._KafkaConsumer", return_value=mock_consumer):
+            consumer = KafkaEventConsumer(
+                "localhost:9092", "security-events", "test-group",
+            )
+        consumer._mock = mock_consumer  # type: ignore[attr-defined]
+        return consumer
+
+    def test_consume_records_tags_valid_and_invalid(self):
+        """A poll returns both valid and invalid records, in order."""
+        event = _make_event()
+        bad_msg = _mock_message(b"garbage", offset=4)
+        good_msg = _mock_message(serialize_event(event), offset=5)
+        consumer = self._make_consumer_with_records({(0, 0): [bad_msg, good_msg]})
+
+        records = consumer.consume_records(timeout_ms=100)
+
+        assert len(records) == 2
+        assert records[0].event is None
+        assert records[0].error is not None
+        assert records[0].offset == 4
+        assert records[0].raw_value == b"garbage"
+        assert isinstance(records[1].event, SecurityEvent)
+        assert records[1].event.event_id == event.event_id
+        assert records[1].error is None
+
+    def test_consume_records_does_not_commit(self):
+        """Polling never commits; the caller owns offset advancement."""
+        event = _make_event()
+        consumer = self._make_consumer_with_records(
+            {(0, 0): [_mock_message(serialize_event(event))]}
+        )
+        consumer.consume_records(timeout_ms=100)
+        consumer._mock.commit.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_consume_records_empty(self):
+        consumer = self._make_consumer_with_records({})
+        assert consumer.consume_records(timeout_ms=100) == []
+
+    def test_commit_sends_offset_plus_one(self):
+        """commit() advances the committed offset to offset + 1."""
+        consumer = self._make_consumer_with_records({})
+        consumer.commit("security-events", partition=2, offset=7)
+
+        args, _kwargs = consumer._mock.commit.call_args  # type: ignore[attr-defined]
+        offsets = args[0]
+        (tp,) = offsets.keys()
+        assert tp.topic == "security-events"
+        assert tp.partition == 2
+        assert offsets[tp].offset == 8

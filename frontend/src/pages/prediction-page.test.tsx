@@ -108,6 +108,7 @@ const RESULT: PredictionResult = {
   ],
   limitations_note:
     'This is a projection, not a finding. Nothing above should be treated as evidence without a persisted source.',
+  created_at: '2026-10-28T14:24:42Z',
   provenance: 'ai_generated',
 }
 
@@ -121,7 +122,8 @@ const INSUFFICIENT: PredictionResult = {
     ...RESULT.metadata,
     observed_technique_count: 0,
     unavailable_inputs: {
-      attack_mappings: 'no persisted mapping rows',
+      persisted_attack_mapping:
+        'no persisted detection in this correlation carries an ATT&CK rule_reference mapping',
       debate: 'no debate was available',
     },
   },
@@ -220,6 +222,28 @@ describe('PredictionPage', () => {
     expect(screen.getByText(/penalty −0.10/)).toBeInTheDocument()
   })
 
+  it('shows when the persisted prediction was recorded', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json(RESULT))
+
+    renderRoute(`/predictions/${SESSION}`, '/predictions/:predictionId')
+    await screen.findByTestId('prediction-target')
+
+    expect(screen.getByTestId('prediction-created-at')).toHaveTextContent(
+      '28 Oct 2026 14:24:42 UTC',
+    )
+  })
+
+  it('does not invent a recorded timestamp when the API omits it', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      json({ ...RESULT, created_at: null }),
+    )
+
+    renderRoute(`/predictions/${SESSION}`, '/predictions/:predictionId')
+    await screen.findByTestId('prediction-target')
+
+    expect(screen.queryByTestId('prediction-created-at')).toBeNull()
+  })
+
   it('shows the deterministic confidence breakdown', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json(RESULT))
 
@@ -301,7 +325,10 @@ describe('PredictionPage', () => {
     expect(screen.getByText('insufficient evidence')).toBeInTheDocument()
     expect(screen.getByText('returned without speculation')).toBeInTheDocument()
     expect(
-      screen.getByText(/Returning nothing is the correct result/i),
+      screen.getByText(/Missing prerequisite: no persisted detection/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/will not infer a technique from rule titles/i),
     ).toBeInTheDocument()
   })
 
@@ -312,7 +339,7 @@ describe('PredictionPage', () => {
     await screen.findByTestId('prediction-insufficient')
 
     const inputs = screen.getByTestId('prediction-unavailable-inputs')
-    expect(inputs).toHaveTextContent('attack_mappings')
+    expect(inputs).toHaveTextContent('persisted_attack_mapping')
     expect(inputs).toHaveTextContent('debate')
   })
 

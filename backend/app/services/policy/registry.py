@@ -28,7 +28,7 @@ from typing import Any
 
 from app.schemas.policy_decision import PolicyRule, ResponseActionType
 from app.services.policy.errors import PolicyRuleConfigurationError
-from app.services.policy.rules import DEFAULT_POLICY_RULES
+from app.services.policy.rules import ALL_POLICY_RULES, DEFAULT_POLICY_RULES
 
 #: Documented sentinel used when no enabled rule governs an action.
 NO_COVERAGE_RULE_ID = "POLICY-NO-COVERAGE"
@@ -103,6 +103,9 @@ def _default_registry() -> PolicyRuleRegistry:
 #: Lazily built canonical default registry (module-level singleton).
 DEFAULT_REGISTRY: PolicyRuleRegistry = _default_registry()
 
+#: Enterprise registry containing full suite of prioritized operational policies.
+ENTERPRISE_REGISTRY: PolicyRuleRegistry = PolicyRuleRegistry(ALL_POLICY_RULES)
+
 
 #: Convenience helper kept out of public API docs.
 def _serialized(rules: Iterable[Any]) -> list[dict[str, Any]]:
@@ -111,6 +114,7 @@ def _serialized(rules: Iterable[Any]) -> list[dict[str, Any]]:
 
 __all__ = [
     "DEFAULT_REGISTRY",
+    "ENTERPRISE_REGISTRY",
     "NO_COVERAGE_RULE_ID",
     "PolicyRuleRegistry",
 ]

@@ -28,9 +28,11 @@ failure would not say which input was at fault.
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
+from app.agents.debate.evidence import graph_snapshot_digest
 from app.schemas.playbook import PlaybookInputs
 from app.services.knowledge_graph.queries import BoundedGraph
 from app.services.knowledge_graph.vocabulary import NodeType
@@ -125,6 +127,66 @@ def _assemble(
 
 def _graph(*nodes, edges=(), **kwargs) -> BoundedGraph:
     return BoundedGraph(nodes=list(nodes), edges=list(edges), **kwargs)
+
+
+DEBATE_ID = uuid.UUID("99999999-9999-4999-8999-999999999999")
+PREDICTION_SESSION_ID = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+PREDICTION_ID = uuid.UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+
+def _debate(graph_digest: str, *, debate_id: uuid.UUID = DEBATE_ID):
+    return SimpleNamespace(
+        debate_id=debate_id,
+        metadata=SimpleNamespace(graph_snapshot_digest=graph_digest),
+        consensus=SimpleNamespace(
+            state=SimpleNamespace(value="partial_consensus"),
+            consensus_strength=0.7,
+            unresolved_questions=[],
+            evidence_gaps=[],
+            dissent=[],
+        ),
+    )
+
+
+def _prediction_session(
+    graph_digest: str,
+    *,
+    debate_id: str | None = str(DEBATE_ID),
+    with_prediction: bool = True,
+):
+    predictions = []
+    if with_prediction:
+        predictions.append(
+            SimpleNamespace(
+                prediction_session_id=PREDICTION_SESSION_ID,
+                prediction_id=PREDICTION_ID,
+                prediction_kind=SimpleNamespace(value="NEXT_ACTIVITY"),
+                depth=SimpleNamespace(value="immediate"),
+                prediction_status=SimpleNamespace(value="PREDICTED"),
+                target="10.0.0.1",
+                target_basis=SimpleNamespace(
+                    value="persisted_attack_mapping"
+                ),
+                uncertainty=SimpleNamespace(
+                    confidence=0.7,
+                    supporting_evidence=[],
+                    contradicting_evidence=[],
+                ),
+            )
+        )
+    return SimpleNamespace(
+        prediction_session_id=PREDICTION_SESSION_ID,
+        status=SimpleNamespace(value="PREDICTED"),
+        predictions=predictions,
+        uncertainty=SimpleNamespace(
+            unresolved_questions=[],
+            evidence_gaps=[],
+        ),
+        metadata=SimpleNamespace(
+            graph_snapshot_digest=graph_digest,
+            debate_id=debate_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +497,74 @@ class TestTargetResolution:
     def test_a_non_indicator_node_yields_no_target(self) -> None:
         inputs = _assemble(_graph(_node(NodeType.DETECTION, "det-1")))
         assert inputs.targets == {}
+
+
+# ---------------------------------------------------------------------------
+# Upstream artifacts must describe the same graph state
+# ---------------------------------------------------------------------------
+
+
+class TestUpstreamSnapshotCompatibility:
+    def test_a_matching_debate_and_prediction_are_consumed(self) -> None:
+        graph = _graph(_node(NodeType.DETECTION, "det-1"))
+        digest = graph_snapshot_digest(graph)
+        inputs = _assemble(
+            graph,
+            debates=[_debate(digest)],
+            predictions=[_prediction_session(digest)],
+        )
+        assert inputs.debate is not None
+        assert inputs.debate.debate_id == DEBATE_ID
+        assert inputs.prediction is not None
+        assert inputs.prediction.prediction_session_id == PREDICTION_SESSION_ID
+
+    def test_a_debate_from_another_snapshot_is_not_consumed(self) -> None:
+        graph = _graph(_node(NodeType.DETECTION, "det-1"))
+        inputs = _assemble(graph, debates=[_debate("f" * 64)])
+        assert inputs.debate is None
+        assert "different graph snapshot" in inputs.unavailable_inputs["debate"]
+
+    def test_a_prediction_from_another_snapshot_is_not_consumed(self) -> None:
+        """A stale prediction cannot be paired with a fresh graph.
+
+        The latest prediction session may name targets that no longer exist in
+        the current graph.  It must be declared unavailable so the proposal is
+        not grounded in reasoning over a different state.
+        """
+        graph = _graph(_node(NodeType.DETECTION, "det-1"))
+        digest = graph_snapshot_digest(graph)
+        inputs = _assemble(
+            graph,
+            debates=[_debate(digest)],
+            predictions=[_prediction_session("f" * 64)],
+        )
+        assert inputs.prediction is None
+        assert "different graph snapshot" in inputs.unavailable_inputs["prediction"]
+
+    def test_a_prediction_that_consumed_another_debate_is_not_consumed(self) -> None:
+        graph = _graph(_node(NodeType.DETECTION, "det-1"))
+        digest = graph_snapshot_digest(graph)
+        other_debate = uuid.UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+        inputs = _assemble(
+            graph,
+            debates=[_debate(digest)],
+            predictions=[
+                _prediction_session(digest, debate_id=str(other_debate))
+            ],
+        )
+        assert inputs.prediction is None
+        assert "different debate" in inputs.unavailable_inputs["prediction"]
+
+    def test_a_prediction_session_with_no_predictions_is_not_consumed(self) -> None:
+        graph = _graph(_node(NodeType.DETECTION, "det-1"))
+        digest = graph_snapshot_digest(graph)
+        inputs = _assemble(
+            graph,
+            debates=[_debate(digest)],
+            predictions=[_prediction_session(digest, with_prediction=False)],
+        )
+        assert inputs.prediction is None
+        assert "contains no predictions" in inputs.unavailable_inputs["prediction"]
 
 
 # ---------------------------------------------------------------------------

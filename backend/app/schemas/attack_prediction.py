@@ -21,6 +21,7 @@ Two invariants are enforced by the contracts rather than by convention:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -316,6 +317,14 @@ class PredictionResult(BaseModel):
     limitations_note: BoundedShort = Field(
         ...,
         description="Always-present statement that predictions are not evidence.",
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the persisted prediction session was recorded. Populated on "
+            "read from the session row; it is metadata and never part of the "
+            "deterministic session identity."
+        ),
     )
     provenance: PredictionProvenance = Provenance.AI_GENERATED
 

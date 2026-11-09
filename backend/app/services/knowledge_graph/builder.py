@@ -474,13 +474,24 @@ class KnowledgeGraphBuilder:
         """
         if not event_ids:
             return
+        resolved_event_ids: list[uuid.UUID] = []
+        for e in event_ids:
+            if isinstance(e, uuid.UUID):
+                resolved_event_ids.append(e)
+            else:
+                try:
+                    resolved_event_ids.append(uuid.UUID(str(e)))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        if not resolved_event_ids:
+            return
         rows = db.execute(
             select(ThreatIntelLookup, ThreatIntelIndicator)
             .join(
                 ThreatIntelIndicator,
                 ThreatIntelIndicator.id == ThreatIntelLookup.indicator_id,
             )
-            .where(ThreatIntelLookup.event_id.in_(event_ids))
+            .where(ThreatIntelLookup.event_id.in_(resolved_event_ids))
             .order_by(ThreatIntelLookup.id, ThreatIntelIndicator.id)
         ).all()
         for lookup, indicator in rows:

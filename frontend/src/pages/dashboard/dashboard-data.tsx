@@ -16,6 +16,17 @@ export const INCIDENT_ROWS = 8
 export const ACTIVITY_ROWS = 7
 export const EVENT_ROWS = 10
 
+/**
+ * How often the dashboard re-reads its bounded feeds.
+ *
+ * The feeds are driven by out-of-band writers (the demo CLI, the Kafka
+ * ingestion worker, an analyst's browser), so nothing in this tab is notified
+ * when new detections, correlations or risk assessments land. Without a poll
+ * the panels stay frozen on the snapshot fetched at mount until the operator
+ * happens to reload, which makes a freshly-run demo look like it did nothing.
+ */
+export const LIVE_REFETCH_MS = 15_000
+
 /** Bounded pending-approvals feed shown on the dashboard. */
 export const APPROVALS_LIMIT = 10
 export const APPROVALS_PENDING_KEY = ['approvals', 'pending'] as const
@@ -66,39 +77,48 @@ export function useDashboardData() {
   const detections = useQuery({
     queryKey: ['detections', 'recent', FEED],
     queryFn: () => detectionsApi.recent(FEED),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const correlations = useQuery({
     queryKey: ['correlations', 'recent', FEED],
     queryFn: () => correlationsApi.recent(FEED),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const risks = useQuery({
     queryKey: ['risks', 'recent', FEED],
     queryFn: () => risksApi.recent(FEED),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const memories = useQuery({
     queryKey: ['memories', 'recent', FEED],
     queryFn: () => memoriesApi.recent(FEED),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const rules = useQuery({
     queryKey: ['detection-rules', 'list'],
     queryFn: () => detectionRulesApi.list(),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const analytics = useQuery({
     queryKey: ['detection-rules', 'analytics', '30d'],
     queryFn: () => detectionRulesApi.analytics('30d'),
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const db = useQuery({
     queryKey: ['health', 'database'],
     queryFn: healthApi.database,
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const kafka = useQuery({
     queryKey: ['health', 'kafka'],
     queryFn: healthApi.kafka,
+    refetchInterval: LIVE_REFETCH_MS,
   })
   const approvals = useQuery({
     queryKey: APPROVALS_PENDING_KEY,
     queryFn: () => approvalsApi.recent(APPROVALS_LIMIT, 'pending'),
     enabled: approvalsAccessible,
+    refetchInterval: LIVE_REFETCH_MS,
   })
 
   const detectionFeed = detections.data ?? []

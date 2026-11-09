@@ -2,6 +2,12 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
+
+# Local scratch / personal notes
+/Command.pages
+/start.txt
+/Screenshot*.png
 
 # Python
 __pycache__/

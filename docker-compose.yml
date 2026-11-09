@@ -10,10 +10,16 @@ services:
       POSTGRES_PASSWORD: sentinelai_dev_password
 
     ports:
-      - "5432:5432"
+      - "5433:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinelai_user -d sentinelai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka:
     image: apache/kafka:3.9.0
@@ -41,6 +47,38 @@ services:
 
     ports:
       - "9092:9092"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sentinelai-backend-dev
+    profiles: ["all", "full"]
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      DATABASE_URL: postgresql+psycopg://sentinelai_user:sentinelai_dev_password@postgres:5432/sentinelai
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: dev_secret_key_change_in_production
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sentinelai-frontend-dev
+    profiles: ["all", "full"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

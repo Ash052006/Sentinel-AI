@@ -1057,19 +1057,54 @@ class ScenarioContext:
     def correlation_uuid(self) -> uuid.UUID:
         return uuid.UUID(self.correlation_id)
 
+    def _primary_correlation_event(self) -> Any | None:
+        """The normalized event behind the primary persisted correlation.
+
+        Correlation members are the durable event identity: reusing this
+        event keeps TI lookups associated with ``correlation_members.event_id``.
+        """
+        primary = next(
+            (
+                correlation
+                for correlation in self.correlations
+                if str(correlation.correlation_id) == self.correlation_id
+            ),
+            None,
+        )
+        if primary is None or not primary.members:
+            return None
+        member_event_id = primary.members[0].event_id
+        return next(
+            (
+                event
+                for event in self._normalized
+                if event.event_id == member_event_id
+            ),
+            None,
+        )
+
     def analyze_threat_intelligence(self, report: "Report") -> list[Any]:
-        """Run the real TI agent over the first observed event.
+        """Run the real TI agent over the primary correlation's event.
 
         The indicator hunt filters on a persisted indicator value, so this
-        must be the shipped agent rather than a hand-built analysis.
+        must be the shipped agent rather than a hand-built analysis.  The
+        event must be the one already persisted in correlation membership;
+        re-collecting the JSONL would mint a fresh ``event_id`` and leave the
+        lookups unassociated with the correlation graph.
         """
         from app.agents.threat_intelligence import ThreatIntelligenceAgent
 
         self.ensure()
         if self.intel_analyses:
             return self.intel_analyses
-        events, _ = collect("00_full_soc_scenario", "attack_chain.jsonl")
-        enriched = enrich(normalize(events[0]))
+        event = self._primary_correlation_event()
+        if event is None:
+            raise RuntimeError(
+                "the full-SOC scenario has no normalized event matching the "
+                "primary correlation's members; refusing to analyze an "
+                "unassociated event"
+            )
+        enriched = enrich(event)
         registry, _skipped = ti_registry()
         self.intel_analyses = [ThreatIntelligenceAgent(registry).analyze(enriched)]
         report.ok(
@@ -1672,15 +1707,44 @@ def policy_input(
     )
 
 
+def _persisted_policy_correlation(
+    report: Report, db: Any, cleanup: Cleanup, prefix: str
+) -> uuid.UUID | None:
+    """Return this run's persisted correlation, or report why there is none.
+
+    Policy decisions feed approvals and SOAR executions, both of which are
+    graph evidence keyed by ``correlation_id``.  A synthetic id would make
+    those artifacts permanently unlinkable, so the caller must supply a
+    correlation that really exists.
+    """
+    try:
+        context = ScenarioContext(cleanup=cleanup, session=db).ensure()
+        return context.correlation_uuid()
+    except Exception as exc:  # noqa: BLE001
+        report.fail(
+            f"{prefix}policy_correlation",
+            "no persisted correlation is available for policy evaluation; "
+            "refusing to associate approval/SOAR evidence with a fabricated id",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return None
+
+
 def run_policy_scenarios(
-    report: Report, prefix: str = "", only: Iterable[str] | None = None
+    report: Report,
+    prefix: str = "",
+    only: Iterable[str] | None = None,
+    *,
+    correlation_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Evaluate 09 policy scenarios with the real engine.
 
     Returns the produced decisions keyed by ``scenario_id`` so the response,
     HITL and SOAR commands can reuse the *real* decisions instead of
     inventing their own.  *only* restricts the evaluation to the scenario
-    ids a dataset actually references.
+    ids a dataset actually references.  *correlation_id* must be a persisted
+    correlation: approvals and SOAR executions cite it, so a synthetic id
+    would leave them outside the knowledge graph.
     """
     from app.services.policy.engine import PolicyDecisionEngine
 
@@ -1688,10 +1752,16 @@ def run_policy_scenarios(
     data = load_json("09_policy", "scenarios.json")
     wanted = set(only) if only is not None else None
     decisions: dict[str, Any] = {}
+    if correlation_id is None:
+        report.fail(
+            f"{prefix}policy_correlation",
+            "no persisted correlation is available; refusing to evaluate "
+            "policy scenarios against a fabricated correlation id",
+        )
+        return decisions
     for scenario in data["scenarios"]:
         if wanted is not None and scenario["scenario_id"] not in wanted:
             continue
-        correlation_id = demo_uuid("policy", scenario["scenario_id"])
         try:
             decision = policy_input(scenario, correlation_id)
         except Exception as exc:  # noqa: BLE001
@@ -1728,7 +1798,12 @@ def run_policy_scenarios(
 
 
 def cmd_policy(report: Report, sandbox: bool) -> None:
-    run_policy_scenarios(report)
+    _load_cleanup_tables()
+    with db_session() as db:
+        cleanup = new_cleanup(db)
+        correlation_id = _persisted_policy_correlation(report, db, cleanup, "")
+        run_policy_scenarios(report, correlation_id=correlation_id)
+        defer_or_clean(report, "policy", cleanup, db)
 
 
 # ---------------------------------------------------------------------------
@@ -1743,7 +1818,14 @@ def cmd_response(report: Report, sandbox: bool) -> None:
     from app.services.response.registry import DEFAULT_RESPONSE_REGISTRY
     from app.services.response.service import ResponseMitigationService
 
-    decisions = run_policy_scenarios(report, prefix="response/")
+    _load_cleanup_tables()
+    with db_session() as db:
+        cleanup = new_cleanup(db)
+        correlation_id = _persisted_policy_correlation(report, db, cleanup, "response/")
+        decisions = run_policy_scenarios(
+            report, prefix="response/", correlation_id=correlation_id
+        )
+        defer_or_clean(report, "response", cleanup, db)
     data = load_json("10_response", "scenarios.json")
     spy_registry = _CountingResponseRegistry(DEFAULT_RESPONSE_REGISTRY)
     executor = ResponseExecutor(registry=spy_registry)
@@ -2232,6 +2314,75 @@ def _current_incident_memory_payload(
     }
 
 
+def _historical_memory_correlation_ids(memory_input: Any) -> list[uuid.UUID]:
+    """Correlation identities the historical memory explicitly cites."""
+    ids: set[uuid.UUID] = set()
+    if memory_input.correlation_id is not None:
+        ids.add(memory_input.correlation_id)
+    for source in memory_input.sources:
+        if source.correlation_id is not None:
+            ids.add(source.correlation_id)
+    return sorted(ids)
+
+
+def _report_historical_memory_association(
+    report: Report, db: Any, memory_input: Any
+) -> None:
+    """State whether the historical memory can be linked into the graph.
+
+    The graph is correlation-centered: a memory is only materialized when its
+    top-level ``correlation_id`` names a persisted correlation.  The shipped
+    historical fixture cites a previously closed incident whose correlation
+    does not exist, so the memory is kept for recall/learning but cannot get
+    a graph node.  That absence is reported deliberately; no correlation row
+    is fabricated to manufacture an edge.
+    """
+    cited = _historical_memory_correlation_ids(memory_input)
+    if not cited:
+        report.skip(
+            "historical_correlation_association",
+            "the historical memory cites no correlation; it is retained for "
+            "recall/learning but has no graph association",
+        )
+        return
+
+    from app.repositories.correlation import CorrelationRepository
+
+    repository = CorrelationRepository(db)
+    missing = [
+        correlation_id
+        for correlation_id in cited
+        if repository.get_by_correlation_id(correlation_id) is None
+    ]
+    anchor = memory_input.correlation_id
+    if anchor is None:
+        report.skip(
+            "historical_correlation_association",
+            "the historical memory has no top-level correlation anchor, so the "
+            "correlation-centered builder cannot materialize it; it is retained "
+            "for recall/learning and its source citations are preserved. "
+            "No fake correlation was created.",
+            cited_correlation_ids=[str(c) for c in cited],
+            unpersisted_source_citations=[str(c) for c in missing],
+        )
+    elif anchor in missing:
+        report.skip(
+            "historical_correlation_association",
+            "the historical memory is not graph-associated: its correlation "
+            "anchor is not persisted. It is retained for recall/learning. "
+            "No fake correlation was created.",
+            cited_correlation_ids=[str(c) for c in cited],
+            unpersisted_source_citations=[str(c) for c in missing],
+        )
+    else:
+        report.ok(
+            "historical_correlation_association",
+            "the historical memory anchors to a persisted correlation, so the "
+            "builder can derive its graph association",
+            cited_correlation_ids=[str(c) for c in cited],
+        )
+
+
 def cmd_incident_memory(report: Report, sandbox: bool) -> None:
     """Extract, persist and consolidate memories with the real services."""
     from app.schemas.incident_memory import MemoryType
@@ -2281,6 +2432,7 @@ def cmd_incident_memory(report: Report, sandbox: bool) -> None:
 
     with db_session() as db:
         cleanup = new_cleanup(db)
+        _report_historical_memory_association(report, db, memory_input)
         try:
             summary = IncidentMemoryPersistenceService().persist_memories(db, memories)
             db.commit()
@@ -2388,11 +2540,11 @@ def cmd_incident_memory(report: Report, sandbox: bool) -> None:
         )
 
         try:
-            # The learning service's default factory cannot be used as
-            # shipped: it calls ``IncidentMemoryQueryService(db)`` while the
-            # query service's first argument is a *repository* factory, so
-            # the Session is later invoked as a callable.  Passing the
-            # correct factory is a caller-side fix and needs no app change.
+            # F-06 fixed IncidentMemoryLearningService's default
+            # query-service factory, which previously passed the Session into
+            # ``IncidentMemoryQueryService``'s repository-factory slot.  The
+            # runner still injects the factory explicitly so the demo does
+            # not depend on the service's default.
             result = IncidentMemoryLearningService(
                 query_service_factory=lambda _db: IncidentMemoryQueryService()
             ).consolidate(db, clock=NOW, min_occurrences=1)
@@ -2545,12 +2697,14 @@ def cmd_hitl(report: Report, sandbox: bool) -> None:
 
     with db_session() as db:
         cleanup = new_cleanup(db)
+        correlation_id = _persisted_policy_correlation(report, db, cleanup, "hitl/")
         requester = demo_user(db, "analyst", cleanup)
         approver = demo_user(db, "ciso", cleanup)
         decisions = run_policy_scenarios(
             report,
             prefix="hitl/",
             only={sc["policy_scenario_id"] for sc in data["scenarios"]},
+            correlation_id=correlation_id,
         )
         service = ApprovalLifecycle()
 
@@ -2996,12 +3150,14 @@ def cmd_soar(report: Report, sandbox: bool) -> None:
 
     with db_session() as db:
         cleanup = new_cleanup(db)
+        correlation_id = _persisted_policy_correlation(report, db, cleanup, "soar/")
         operator = demo_user(db, "analyst", cleanup)
         service_approval = ApprovalService()
         decisions = run_policy_scenarios(
             report,
             prefix="soar/",
             only={sc["policy_scenario_id"] for sc in data["scenarios"]},
+            correlation_id=correlation_id,
         )
         service = SoarService()
         response_executor = ResponseExecutor(registry=DEFAULT_RESPONSE_REGISTRY)
@@ -4191,7 +4347,6 @@ def cmd_manifest(report: Report, sandbox: bool) -> None:
             "JSONL YARA ingestion is unreachable because no shipped source mapping forwards file content; YARA matches only explicit targets (evaluate_target).",
             "Investigation/report/NL-SOC answers require a GEMINI_API_KEY; without one the runner skips and never fabricates.",
             "Threat-intelligence lookups require the real provider keys in .env; failures are captured, never fabricated.",
-            "IncidentMemoryLearningService() ships with a broken default factory; the runner passes the correct repository-factory.",
         ],
         "functions": functions,
     }

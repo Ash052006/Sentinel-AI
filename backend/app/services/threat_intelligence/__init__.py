@@ -24,6 +24,11 @@ from app.services.threat_intelligence.types import (
     IndicatorType,
     ThreatIndicator,
 )
+from app.services.threat_intelligence.validation import (
+    classify_non_public_ip,
+    is_non_public_ip,
+    should_skip_external_lookup,
+)
 from app.services.threat_intelligence.virustotal import VirusTotalProvider
 from app.services.threat_intelligence.abuseipdb import AbuseIPDBProvider
 from app.services.threat_intelligence.alienvault_otx import AlienVaultOTXProvider
@@ -44,4 +49,7 @@ __all__ = [
     "VirusTotalProvider",
     "AbuseIPDBProvider",
     "AlienVaultOTXProvider",
+    "is_non_public_ip",
+    "classify_non_public_ip",
+    "should_skip_external_lookup",
 ]

@@ -34,6 +34,12 @@ Behavioural guarantees
 * **Secret-safe.**  Error messages are sanitized and structured evidence is
   recursively key-redacted before persistence.  No API keys, authorization
   headers, cookies, credentials, or raw HTTP responses are ever stored.
+* **Post-commit graph refresh.**  When new lookups are committed, the
+  knowledge-graph subgraph of every correlation *genuinely* associated with
+  the event (via persisted ``correlation_members.event_id``) is refreshed
+  through the shared, isolated materializer.  The refresh runs strictly
+  after the TI commit, never invents an association when no correlation
+  member references the event, and can never undo the committed lookups.
 """
 
 from __future__ import annotations
@@ -44,9 +50,14 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.models.threat_intel_indicator import ThreatIntelIndicator
 from app.models.threat_intel_lookup import LookupStatus, ThreatIntelLookup
@@ -109,18 +120,19 @@ class ThreatIntelPersistenceValidationError(ThreatIntelPersistenceError):
 class ThreatIntelPersistenceResult:
     """Summary of one ``persist_analysis`` invocation."""
 
-    event_id: uuid.UUID
+    event_id: uuid.UUID | None
     indicator_ids: tuple[uuid.UUID, ...]
     lookup_ids: tuple[uuid.UUID, ...]
     indicators_created: int = 0
     indicators_updated: int = 0
     lookups_created: int = 0
+    lookups_updated: int = 0
     lookups_skipped: int = 0
 
     @property
     def is_empty(self) -> bool:
         """True when nothing was persisted (e.g. an empty analysis)."""
-        return not (self.indicators_created or self.indicators_updated or self.lookups_created)
+        return not (self.indicators_created or self.indicators_updated or self.lookups_created or self.lookups_updated)
 # ---------------------------------------------------------------------------
 # Secret-safe sanitization
 # ---------------------------------------------------------------------------
@@ -221,6 +233,17 @@ def canonical_indicator_key(indicator_type: IndicatorType, value: str) -> str:
     if indicator_type in (IndicatorType.DOMAIN, IndicatorType.HASH):
         normalized = value.lower()
     return f"{indicator_type.value}:{normalized}"
+
+
+def _dt_equal(dt1: datetime | None, dt2: datetime | None) -> bool:
+    """Compare two datetimes safely across aware and naive UTC representations."""
+    if dt1 is None or dt2 is None:
+        return dt1 is dt2
+    if dt1.tzinfo is None and dt2.tzinfo is not None:
+        dt1 = dt1.replace(tzinfo=timezone.utc)
+    elif dt2.tzinfo is None and dt1.tzinfo is not None:
+        dt2 = dt2.replace(tzinfo=timezone.utc)
+    return dt1 == dt2
 # ---------------------------------------------------------------------------
 # Persistence service
 # ---------------------------------------------------------------------------
@@ -235,15 +258,21 @@ class ThreatIntelligencePersistenceService:
         clock: Optional UTC time source; used when an analysis provides no
             lookup timestamp (failures, or indicators without lookups).
             Defaults to ``datetime.now(timezone.utc)``.
+        graph_materializer: Optional post-commit hook used to refresh the
+            knowledge graph of correlations associated with the analyzed
+            event.  Defaults to the shared knowledge-graph materializer.
+            Injected for testability.
     """
 
     def __init__(
         self,
         repository_factory: Callable[[Session], ThreatIntelRepository] = ThreatIntelRepository,
         clock: Callable[[], datetime] | None = None,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._repository_factory = repository_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._graph_materializer = graph_materializer
 
     def persist_analysis(
         self,
@@ -254,7 +283,11 @@ class ThreatIntelligencePersistenceService:
 
         One logical transaction: every indicator and lookup is staged, a
         single ``commit()`` publishes them together, and any failure rolls
-        the unit back before a safe exception propagates.
+        the unit back before a safe exception propagates.  When new lookups
+        are committed, the knowledge graph of every correlation genuinely
+        associated with the event is refreshed afterwards as an isolated
+        post-commit side effect (see
+        :meth:`_refresh_associated_correlation_graphs`).
         """
         try:
             return self._persist(db, analysis)
@@ -301,32 +334,55 @@ class ThreatIntelligencePersistenceService:
                 indicators_updated += 1
 
         # 3. Persist lookups: success outcomes, then failure outcomes.
-        lookups_created = lookups_skipped = 0
+        lookups_created = lookups_updated = lookups_skipped = 0
         lookups: list[ThreatIntelLookup] = []
 
         for association in analysis.results:
             result = association.result
             if result is None:
-                # "Lookup not performed / had no result" — nothing to store.
                 continue
             key = canonical_indicator_key(
                 association.indicator.indicator_type, association.indicator.indicator
             )
             indicator = indicator_rows[key]
             performed_at = result.timestamp
-            existing = repo.find_existing_lookup(
-                event_id=event_id,
-                indicator_id=indicator.id,
-                provider=association.provider,
-                status=LookupStatus.SUCCESS,
-                performed_at=performed_at,
-            )
-            if existing is not None:
-                lookups_skipped += 1
-                continue
-            lookups.append(
-                ThreatIntelLookup(
+
+            if event_id is not None:
+                existing = repo.find_event_lookup(
                     event_id=event_id,
+                    indicator_id=indicator.id,
+                    provider=association.provider,
+                )
+                if existing is not None:
+                    is_identical = (
+                        existing.status == LookupStatus.SUCCESS
+                        and existing.found == result.found
+                        and existing.confidence == result.confidence
+                        and _dt_equal(existing.result_timestamp, result.timestamp)
+                    )
+                    if is_identical:
+                        lookups_skipped += 1
+                        continue
+                    existing.status = LookupStatus.SUCCESS
+                    existing.performed_at = performed_at
+                    existing.found = result.found
+                    existing.confidence = result.confidence
+                    existing.result_timestamp = result.timestamp
+                    existing.evidence = _prepare_structured(result.data, field="evidence")
+                    existing.result_metadata = _prepare_structured(
+                        result.metadata, field="result_metadata"
+                    )
+                    existing.error_type = None
+                    existing.error_message = None
+                    existing.retryable = None
+                    existing.provenance = Provenance.ENRICHED.value
+                    lookups.append(existing)
+                    lookups_updated += 1
+                    continue
+
+                new_lookup = ThreatIntelLookup(
+                    event_id=event_id,
+                    origin="event",
                     indicator_id=indicator.id,
                     provider=association.provider,
                     status=LookupStatus.SUCCESS,
@@ -340,28 +396,93 @@ class ThreatIntelligencePersistenceService:
                     ),
                     provenance=Provenance.ENRICHED.value,
                 )
-            )
-            lookups_created += 1
+                try:
+                    with db.begin_nested():
+                        repo.add(new_lookup)
+                        db.flush()
+                    lookups.append(new_lookup)
+                    lookups_created += 1
+                except IntegrityError:
+                    existing = repo.find_event_lookup(
+                        event_id=event_id,
+                        indicator_id=indicator.id,
+                        provider=association.provider,
+                    )
+                    if existing is not None:
+                        existing.status = LookupStatus.SUCCESS
+                        existing.performed_at = performed_at
+                        existing.found = result.found
+                        existing.confidence = result.confidence
+                        existing.result_timestamp = result.timestamp
+                        existing.evidence = _prepare_structured(result.data, field="evidence")
+                        existing.result_metadata = _prepare_structured(
+                            result.metadata, field="result_metadata"
+                        )
+                        existing.error_type = None
+                        existing.error_message = None
+                        existing.retryable = None
+                        lookups.append(existing)
+                        lookups_updated += 1
+            else:
+                new_lookup = ThreatIntelLookup(
+                    event_id=None,
+                    origin="manual",
+                    indicator_id=indicator.id,
+                    provider=association.provider,
+                    status=LookupStatus.SUCCESS,
+                    performed_at=performed_at,
+                    found=result.found,
+                    confidence=result.confidence,
+                    result_timestamp=result.timestamp,
+                    evidence=_prepare_structured(result.data, field="evidence"),
+                    result_metadata=_prepare_structured(
+                        result.metadata, field="result_metadata"
+                    ),
+                    provenance=Provenance.ENRICHED.value,
+                )
+                repo.add(new_lookup)
+                lookups.append(new_lookup)
+                lookups_created += 1
 
         for failure in analysis.failures:
             key = canonical_indicator_key(failure.indicator_type, failure.indicator)
             indicator = indicator_rows[key]
             safe_message = sanitize_error_message(failure.message)
-            existing = repo.find_existing_lookup(
-                event_id=event_id,
-                indicator_id=indicator.id,
-                provider=failure.provider,
-                status=LookupStatus.ERROR,
-                error_type=failure.error_type,
-                error_message=safe_message,
-                retryable=failure.retryable,
-            )
-            if existing is not None:
-                lookups_skipped += 1
-                continue
-            lookups.append(
-                ThreatIntelLookup(
+
+            if event_id is not None:
+                existing = repo.find_event_lookup(
                     event_id=event_id,
+                    indicator_id=indicator.id,
+                    provider=failure.provider,
+                )
+                if existing is not None:
+                    is_identical = (
+                        existing.status == LookupStatus.ERROR
+                        and existing.error_type == failure.error_type
+                        and existing.error_message == safe_message
+                        and existing.retryable == failure.retryable
+                    )
+                    if is_identical:
+                        lookups_skipped += 1
+                        continue
+                    existing.status = LookupStatus.ERROR
+                    existing.performed_at = now
+                    existing.error_type = failure.error_type
+                    existing.error_message = safe_message
+                    existing.retryable = failure.retryable
+                    existing.found = None
+                    existing.confidence = None
+                    existing.result_timestamp = None
+                    existing.evidence = None
+                    existing.result_metadata = None
+                    existing.provenance = Provenance.ENRICHED.value
+                    lookups.append(existing)
+                    lookups_updated += 1
+                    continue
+
+                new_lookup = ThreatIntelLookup(
+                    event_id=event_id,
+                    origin="event",
                     indicator_id=indicator.id,
                     provider=failure.provider,
                     status=LookupStatus.ERROR,
@@ -371,17 +492,63 @@ class ThreatIntelligencePersistenceService:
                     retryable=failure.retryable,
                     provenance=Provenance.ENRICHED.value,
                 )
-            )
-            lookups_created += 1
+                try:
+                    with db.begin_nested():
+                        repo.add(new_lookup)
+                        db.flush()
+                    lookups.append(new_lookup)
+                    lookups_created += 1
+                except IntegrityError:
+                    existing = repo.find_event_lookup(
+                        event_id=event_id,
+                        indicator_id=indicator.id,
+                        provider=failure.provider,
+                    )
+                    if existing is not None:
+                        existing.status = LookupStatus.ERROR
+                        existing.performed_at = now
+                        existing.error_type = failure.error_type
+                        existing.error_message = safe_message
+                        existing.retryable = failure.retryable
+                        existing.found = None
+                        existing.confidence = None
+                        existing.result_timestamp = None
+                        existing.evidence = None
+                        existing.result_metadata = None
+                        lookups.append(existing)
+                        lookups_updated += 1
+            else:
+                new_lookup = ThreatIntelLookup(
+                    event_id=None,
+                    origin="manual",
+                    indicator_id=indicator.id,
+                    provider=failure.provider,
+                    status=LookupStatus.ERROR,
+                    performed_at=now,
+                    error_type=failure.error_type,
+                    error_message=safe_message,
+                    retryable=failure.retryable,
+                    provenance=Provenance.ENRICHED.value,
+                )
+                repo.add(new_lookup)
+                lookups.append(new_lookup)
+                lookups_created += 1
 
-        # 4. Stage lookups; flush so UUIDs are materialized for the summary.
-        for lookup in lookups:
-            repo.add(lookup)
+        # 4. Flush and commit lookups.
         if lookups:
             db.flush()
 
         if indicators or lookups:
             db.commit()
+
+        # The lookups above are now durable and visible.  Refresh the knowledge
+        # graph of every correlation genuinely associated with this event so
+        # the new EVENT -> THREAT_INDICATOR evidence becomes visible.  This is
+        # an isolated post-commit side effect: a graph failure is logged and
+        # swallowed by the shared materializer and can never undo or mask the
+        # committed threat-intelligence results.
+        if lookups and event_id is not None:
+            self._refresh_associated_correlation_graphs(db, event_id)
 
         return ThreatIntelPersistenceResult(
             event_id=event_id,
@@ -390,8 +557,60 @@ class ThreatIntelligencePersistenceService:
             indicators_created=indicators_created,
             indicators_updated=indicators_updated,
             lookups_created=lookups_created,
+            lookups_updated=lookups_updated,
             lookups_skipped=lookups_skipped,
         )
+
+    def _refresh_associated_correlation_graphs(
+        self, db: Session, event_id: uuid.UUID
+    ) -> None:
+        """Best-effort refresh of the graphs of correlations tied to *event_id*.
+
+        The durable association is ``correlation_members.event_id``: a
+        correlation is associated with the event only when a persisted member
+        row references it — the lookup row itself carries no correlation id
+        (V2 stores no such column), so nothing is guessed and no association
+        is fabricated.  An event with no member rows simply has no correlation
+        graph to refresh.
+        """
+        from app.models.correlation_member import CorrelationMember
+        from app.services.knowledge_graph.materialization import (
+            refresh_correlation_graphs,
+        )
+
+        try:
+            correlation_ids = list(
+                db.scalars(
+                    select(CorrelationMember.correlation_id)
+                    .where(CorrelationMember.event_id == event_id)
+                    .distinct()
+                )
+            )
+        except Exception:
+            logger.warning(
+                "knowledge graph refresh skipped for event=%s: could not "
+                "resolve associated correlations",
+                event_id,
+                exc_info=True,
+            )
+            return
+        if not correlation_ids:
+            logger.debug(
+                "knowledge graph refresh skipped for event=%s: no persisted "
+                "correlation member references this event",
+                event_id,
+            )
+            return
+        try:
+            refresh_correlation_graphs(
+                db, correlation_ids, materializer=self._graph_materializer
+            )
+        except Exception:
+            logger.warning(
+                "knowledge graph refresh failed for event=%s",
+                event_id,
+                exc_info=True,
+            )
 
     @staticmethod
     def _collect_indicators(

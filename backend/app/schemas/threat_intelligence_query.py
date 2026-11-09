@@ -110,13 +110,17 @@ class ThreatIntelLookupRecord(BaseModel):
         ...,
         description="The indicator this lookup was performed for.",
     )
-    event_id: uuid.UUID = Field(
-        ...,
+    event_id: uuid.UUID | None = Field(
+        default=None,
         description=(
             "The security event the indicator was extracted from.  "
-            "SentinelAI has no security-event store, so this is a "
-            "correlation key, not a resolvable event."
+            "None for manual lookups.  SentinelAI has no security-event "
+            "store, so this is a correlation key, not a resolvable event."
         ),
+    )
+    origin: str = Field(
+        default="event",
+        description="Lookup origin: 'event' or 'manual'.",
     )
     provider: str = Field(
         ...,

@@ -143,8 +143,17 @@ def _persist(
     *,
     service: CorrelationPersistenceService | None = None,
 ):
-    """Persist *results* through the real service with a fixed clock."""
-    sink = service or CorrelationPersistenceService(clock=lambda: _ts(1))
+    """Persist *results* through the real service with a fixed clock.
+
+    Graph materialization is a separate concern exercised by
+    ``test_correlation_graph_materialization.py``; here it is made inert so
+    these tests stay scoped to correlation/member persistence and never touch
+    a database the graph builder would need.
+    """
+    sink = service or CorrelationPersistenceService(
+        clock=lambda: _ts(1),
+        graph_materializer=lambda _db, _correlation_id: None,
+    )
     return sink.persist_correlations(db, results)
 
 

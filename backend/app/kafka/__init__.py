@@ -9,7 +9,7 @@ The flow::
     Kafka topic → KafkaConsumer → SecurityEvent → Future agents
 """
 
-from app.kafka.consumer import KafkaEventConsumer
+from app.kafka.consumer import ConsumedRecord, KafkaEventConsumer
 from app.kafka.producer import KafkaEventProducer
 from app.kafka.serialization import (
     deserialize_event,
@@ -18,6 +18,7 @@ from app.kafka.serialization import (
 )
 
 __all__ = [
+    "ConsumedRecord",
     "KafkaEventConsumer",
     "KafkaEventProducer",
     "deserialize_event",

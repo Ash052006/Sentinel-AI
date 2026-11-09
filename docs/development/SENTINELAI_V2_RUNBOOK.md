@@ -132,8 +132,8 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-> Use **`backend/requirements.txt`**. The repository-root `requirements.txt` is a UTF-16-encoded,
-> outdated snapshot (it pins `alembic==1.19.1` while the backend installs `1.16.5`). Do not install it.
+> Use **`backend/requirements.txt`**. The repository-root `requirements.txt` was re-encoded to UTF-8 (no BOM, LF) but remains a separate 38-pin snapshot
+> (it pins `alembic==1.19.1` while `backend/requirements.txt` installs `1.16.5`) and is not identical to the backend requirements. Do not install it.
 
 Create the environment file:
 
@@ -157,7 +157,7 @@ python3.12 -c "import secrets; print(secrets.token_urlsafe(48))"
 > Declare `DATABASE_URL` **once**. The template ships it twice (an empty line first, the real value
 > later); the last assignment wins, but the duplicate is confusing — remove the empty one.
 >
-> `1234` is the development password committed in `docker-compose.yml`. It is fine for local work only.
+> `sentinelai_dev_password` is the development password configured in `docker-compose.yml` (Postgres service). The backend in this repo targets native PostgreSQL on `127.0.0.1:5432`; Docker publishes Postgres on host port `5433` in the current Compose config. Do not reuse credentials outside a developer machine.
 > Never reuse it outside a developer machine.
 
 ### 3.3 Migrations
@@ -173,8 +173,8 @@ cd backend
 The chain is linear and ends at a single head:
 
 ```bash
-.venv/bin/alembic heads    # -> c3d4e5f6a1b2 (head)
-.venv/bin/alembic current  # -> c3d4e5f6a1b2 (head)
+.venv/bin/alembic heads    # -> 6b15aae93f78 (head)
+.venv/bin/alembic current  # -> 6b15aae93f78 (head)
 ```
 
 14 migrations run in order. They create the schema and seed the three SOC **roles** — they do **not**
@@ -194,17 +194,18 @@ f121c4c8aa7d  create_foundational_tables
   -> 8a1b2c3d4e5f  create_incident_reports_table
   -> 9c2d4e6f8a1b  seed_soc_roles            <-- roles admin / analyst / ciso
   -> a1b2c3d4e5f6  create_approval_request_tables
-  -> c3d4e5f6a1b2  align_threat_hunt_fk_ondelete   <-- HEAD
+  -> c3d4e5f6a1b2  align_threat_hunt_fk_ondelete
+  -> 6b15aae93f78  create_digital_twin_tables   <-- HEAD
 ```
 
 ### 3.4 Start the backend
 
 ```bash
 cd backend
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8011 --reload
 ```
 
-With `DEBUG=true`, interactive API docs are served at <http://localhost:8000/docs>.
+With `DEBUG=true`, interactive API docs are served at <http://localhost:8011/docs>.
 
 ### 3.5 Start the console
 
@@ -216,8 +217,8 @@ npm install
 npm run dev
 ```
 
-The console is at <http://localhost:5173>. `vite.config.ts` proxies `/api` to
-`http://localhost:8000`, so the browser makes same-origin requests and CORS is not a concern.
+The console is at <http://localhost:8010>. `vite.config.ts` proxies `/api` to
+`http://localhost:8011`, so the browser makes same-origin requests and CORS is not a concern.
 
 ---
 
@@ -917,7 +918,7 @@ Never delete the state file *instead of* cleaning: that is how orphans actually 
 | `SKIPPED=0` but some checks were skipped | the summary counts stages, not checks | use `--json` |
 | An incident report row exists with `status: failed` | no Gemini key; the service persisted a governed failure | expected; see [§8](#8-gemini--external-provider-behaviour) |
 | Kafka health red but demo fine | demo never uses Kafka | ignore for V2 verification |
-| `pip install -r requirements.txt` installed `alembic==1.19.1` | you used the **root** UTF-16 requirements file | install from `backend/requirements.txt` |
+| `pip install -r requirements.txt` installed `alembic==1.19.1` | you used the **root** requirements file (now UTF-8) | install from `backend/requirements.txt` |
 | OTX error lines in demo output | the dataset uses a private IP; OTX rejects it | expected; stage still passes |
 | Demo appears to hang for many minutes | real provider keys are set but outbound network is unreachable; each provider retries 3× at 30s | re-run with `--offline` ([§7.1a](#71a-runtime-depends-on-outbound-network)) |
 | Threat-hunt counts look wrong | an unbounded window matched non-demo rows | filter with `equals` on a known value |

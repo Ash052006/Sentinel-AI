@@ -50,8 +50,10 @@ from sqlalchemy import (
     DateTime,
     Enum as SqlEnum,
     ForeignKey,
+    Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -102,12 +104,33 @@ class ThreatIntelLookup(UUIDTimestampMixin, Base):
             "provenance = 'enriched'",
             name="provenance_enriched",
         ),
+        CheckConstraint(
+            "origin IN ('event', 'manual')",
+            name="ck_threat_intel_lookups_origin_valid",
+        ),
+        Index(
+            "ix_threat_intel_lookups_event_indicator_provider",
+            "event_id",
+            "indicator_id",
+            "provider",
+            unique=True,
+            postgresql_where=text("event_id IS NOT NULL AND origin = 'event'"),
+            sqlite_where=text("event_id IS NOT NULL AND origin = 'event'"),
+        ),
     )
 
-    event_id: Mapped[uuid.UUID] = mapped_column(
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        nullable=False,
+        nullable=True,
         index=True,
+    )
+
+    origin: Mapped[str] = mapped_column(
+        String(32),
+        default="event",
+        server_default="event",
+        nullable=False,
+        comment="Origin of the lookup: 'event' or 'manual'.",
     )
 
     indicator_id: Mapped[uuid.UUID] = mapped_column(

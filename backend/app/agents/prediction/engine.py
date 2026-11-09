@@ -843,8 +843,9 @@ class AttackPredictionEngine:
                 "detections, so predicted stages cannot be expressed as techniques"
             )
         gaps.append(RAG_IS_NOT_EVIDENCE)
-        # Stable, bounded, no duplicates.
-        return list(dict.fromkeys(gaps))[:32]
+        # Stable, bounded, clamped to 256 chars, no duplicates.
+        clamped = [g[:256] for g in gaps]
+        return list(dict.fromkeys(clamped))[:32]
 
     def _unresolved_questions(self, inputs: PredictionInputs) -> list[str]:
         questions: list[str] = []
@@ -853,7 +854,8 @@ class AttackPredictionEngine:
             questions.extend(
                 f"open dissent: {position}" for position in sorted(inputs.debate.dissent_positions)
             )
-        return list(dict.fromkeys(questions))[:32]
+        clamped = [q[:256] for q in questions]
+        return list(dict.fromkeys(clamped))[:32]
 
     def _summary(self, candidate: _Candidate, confidence: float) -> str:
         percent = round(confidence * 100)

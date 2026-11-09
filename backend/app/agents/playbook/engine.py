@@ -407,7 +407,7 @@ class PlaybookEngine:
                 PlaybookConfidenceComponent.CONTRADICTION_PENALTY: 0.0,
                 PlaybookConfidenceComponent.EVIDENCE_GAP_PENALTY: MAX_EVIDENCE_GAP_PENALTY,
             },
-            supporting_evidence_count=len(inputs.established_evidence),
+            supporting_evidence_count=0,
             contradicting_evidence_count=0,
             evidence_gaps=gaps,
             unresolved_questions=questions,

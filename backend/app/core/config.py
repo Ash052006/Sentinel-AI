@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_security_events_topic: str = "security-events"
     kafka_consumer_group: str = "sentinelai-development"
+    # Dead-letter topic for the ingestion worker.  Messages that cannot be
+    # processed (malformed payloads, or events that exhaust the retry budget)
+    # are published here instead of being dropped, so an operator can inspect
+    # and replay them.  It is provisioned explicitly — broker auto-creation is
+    # disabled (see ``KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`` in compose).
+    kafka_security_events_dlq_topic: str = "security-events-dlq"
+    # Bounded, in-process retry budget for *transient* processing failures
+    # (e.g. a database blip).  When the budget is exhausted the event is
+    # dead-lettered rather than blocking the partition forever.  Size this for
+    # the deployment's database-availability SLO; a larger budget trades
+    # latency for fewer dead-letters.
+    kafka_consumer_max_retries: int = 3
+    kafka_consumer_retry_backoff_seconds: float = 1.0
 
     # VirusTotal Threat Intelligence Provider
     virustotal_api_key: str = ""
@@ -45,6 +58,22 @@ class Settings(BaseSettings):
     # AlienVault OTX Threat Intelligence Provider
     otx_api_key: str = ""
     otx_timeout_seconds: float = 30.0
+
+    # Threat-intelligence enrichment (opt-in).  When enabled, the Kafka
+    # ingestion pipeline runs the existing EnrichmentAgent and
+    # ThreatIntelligenceAgent over every event *after* its detections are
+    # persisted, writing indicators/lookups through the established
+    # persistence service.  Disabled by default so ingestion never depends on
+    # external provider availability or credentials: with no provider key
+    # configured, only local indicator extraction runs and no lookup is
+    # fabricated.  See ``docs/development/kafka.md`` for the ordering,
+    # failure-isolation, and synchronous-latency characteristics.
+    threat_intel_enrichment_enabled: bool = False
+
+    # Test-only toggle to allow RFC 5737 and RFC 3849 documentation IP addresses
+    # (e.g. 198.51.100.x, 2001:db8::x) in legacy offline test suites. In production
+    # this must strictly remain False so documentation IPs are never dispatched.
+    threat_intel_allow_documentation_ips: bool = False
 
     # Gemini AI Investigation Provider (Step 12C)
     # The model name is a replaceable configuration value, never a

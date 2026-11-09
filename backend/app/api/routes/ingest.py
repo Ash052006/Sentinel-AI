@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, require_role
+from app.core.config import settings
 from app.models.user import User
 from app.services.audit_service import log_action
 from app.services.ingest_service import (
@@ -25,10 +26,31 @@ from app.services.ingest_service import (
     IngestSummary,
     ingest_jsonl,
 )
+from app.services.threat_intel_enrichment import build_threat_intel_enricher
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _configured_enricher():
+    """Build the opt-in TI enricher once for an HTTP ingest request."""
+    if not settings.threat_intel_enrichment_enabled:
+        return None
+    try:
+        enricher, skipped = build_threat_intel_enricher()
+    except Exception as exc:  # noqa: BLE001 - optional stage must not fail ingest
+        logger.warning(
+            "Threat-intelligence enrichment unavailable for this request: %s",
+            type(exc).__name__,
+        )
+        return None
+    if skipped:
+        logger.info(
+            "Threat-intelligence enrichment enabled; providers skipped: %s",
+            ", ".join(skipped),
+        )
+    return enricher
 
 
 @router.get("/format", response_model=IngestFormat)
@@ -53,7 +75,11 @@ def ingest_events(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "analyst")),
 ) -> IngestSummary:
-    """Ingest an uploaded JSONL file through normalize -> detect -> persist."""
+    """Ingest an uploaded JSONL file through normalize -> detect -> persist.
+
+    Threat-intelligence enrichment is layered on after persistence only when
+    ``threat_intel_enrichment_enabled`` is on; it can never reject an event.
+    """
     raw = file.file.read(MAX_INGEST_BYTES + 1)
     if len(raw) > MAX_INGEST_BYTES:
         raise HTTPException(
@@ -76,7 +102,9 @@ def ingest_events(
         )
 
     try:
-        summary = ingest_jsonl(db, content)
+        summary = ingest_jsonl(
+            db, content, enrichment=_configured_enricher()
+        )
     except IngestRuleSetUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

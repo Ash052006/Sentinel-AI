@@ -23,6 +23,7 @@ from app.api.routes import (
     soar,
     threat_hunts,
     threat_intelligence,
+    threat_intelligence_lookup,
     users,
 )
 
@@ -160,6 +161,14 @@ api_router.include_router(
     prefix="/threat-intelligence",
     tags=["Threat Intelligence"],
 )
+
+v1_router = APIRouter(prefix="/v1")
+v1_router.include_router(
+    threat_intelligence_lookup.router,
+    prefix="/threat-intelligence",
+    tags=["Threat Intelligence Manual Lookup"],
+)
+api_router.include_router(v1_router)
 
 api_router.include_router(
     knowledge_graph.router,

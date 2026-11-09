@@ -17,6 +17,7 @@ import { ConfidenceBar } from './ui/progress'
 import { EmptyState, ErrorState, LoadingRows } from './states'
 import { ProvenanceBadge } from './badges'
 import { formatTimestamp } from '../lib/formats'
+import { cn } from '../lib/utils'
 
 const COVERAGE_TONE: Record<DimensionCoverage, Tone> = {
   grounded: 'low',
@@ -42,10 +43,19 @@ const STATUS_LABEL: Record<ExplanationStatus, string> = {
   ai_unavailable: 'AI unavailable',
 }
 
-function DimensionCard({ dimension }: { dimension: DimensionExplanation }) {
+function DimensionCard({
+  dimension,
+  isLastOdd = false,
+}: {
+  dimension: DimensionExplanation
+  isLastOdd?: boolean
+}) {
   return (
     <li
-      className="rounded-md border border-edge-soft p-3"
+      className={cn(
+        'rounded-md border border-edge-soft p-3',
+        isLastOdd && 'lg:col-span-2',
+      )}
       data-testid={`dimension-${dimension.dimension}`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -114,8 +124,12 @@ function ResultView({ result }: { result: ExplainabilityResult }) {
         className="grid grid-cols-1 gap-2 lg:grid-cols-2"
         data-testid="explanation-dimensions"
       >
-        {result.dimensions.map((dimension) => (
-          <DimensionCard key={dimension.dimension} dimension={dimension} />
+        {result.dimensions.map((dimension, idx) => (
+          <DimensionCard
+            key={dimension.dimension}
+            dimension={dimension}
+            isLastOdd={result.dimensions.length % 2 !== 0 && idx === result.dimensions.length - 1}
+          />
         ))}
       </ul>
 

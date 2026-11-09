@@ -43,6 +43,9 @@ class TestSeedSetIsClosed:
             "terminate_session",
             "isolate_endpoint",
             "endpoint_containment",
+            "ransomware_rapid_response",
+            "credential_theft_mitigation",
+            "c2_infrastructure_takedown",
         }
 
     def test_every_seed_playbook_is_well_formed(self) -> None:

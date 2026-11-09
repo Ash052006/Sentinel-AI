@@ -2,6 +2,7 @@ import { Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Sidebar } from './sidebar'
 import { TopBar } from './topbar'
+import { FloatingAskSoc } from '../components/floating-ask-soc'
 import { UNAUTHORIZED_EVENT } from '../api/client'
 import { useAuthStore } from '../store/auth'
 
@@ -22,7 +23,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="relative flex h-full overflow-hidden">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
@@ -30,6 +31,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <FloatingAskSoc />
     </div>
   )
 }

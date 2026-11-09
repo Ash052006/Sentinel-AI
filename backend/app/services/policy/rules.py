@@ -173,14 +173,131 @@ DEFAULT_POLICY_RULES: tuple[PolicyRule, ...] = (
     ),
 )
 
+#: Enterprise Tier-1/Tier-2 specialized security policies with higher priority (5).
+ENTERPRISE_POLICY_RULES: tuple[PolicyRule, ...] = (
+    PolicyRule(
+        policy_rule_id="POLICY-EMERGENCY-CONTAINMENT-001",
+        action_type=ResponseActionType.ISOLATE_ENDPOINT,
+        minimum_risk_level=RiskLevel.CRITICAL,
+        minimum_confidence=0.85,
+        require_evidence=True,
+        require_investigation=False,
+        require_attribution=False,
+        requires_approval=True,
+        approval_above_risk_level=None,
+        enabled=True,
+        priority=5,
+        description=(
+            "Emergency Ransomware & Threat Containment: rapid endpoint isolation "
+            "for critical risk incidents with confidence >= 0.85; human-in-the-loop "
+            "authorization required."
+        ),
+    ),
+    PolicyRule(
+        policy_rule_id="POLICY-C2-IMMEDIATE-BLOCK-001",
+        action_type=ResponseActionType.BLOCK_IP,
+        minimum_risk_level=RiskLevel.LOW,
+        minimum_confidence=0.85,
+        require_evidence=True,
+        require_investigation=False,
+        require_attribution=False,
+        requires_approval=False,
+        approval_above_risk_level=RiskLevel.HIGH,
+        enabled=True,
+        priority=5,
+        description=(
+            "Automated Perimeter Defense: immediate blocking of confirmed "
+            "command-and-control IP addresses with confidence >= 0.85."
+        ),
+    ),
+    PolicyRule(
+        policy_rule_id="POLICY-CREDENTIAL-THEFT-DISABLE-001",
+        action_type=ResponseActionType.DISABLE_ACCOUNT,
+        minimum_risk_level=RiskLevel.HIGH,
+        minimum_confidence=0.75,
+        require_evidence=True,
+        require_investigation=True,
+        require_attribution=False,
+        requires_approval=True,
+        approval_above_risk_level=None,
+        enabled=True,
+        priority=5,
+        description=(
+            "Compromised Account Containment: account disablement upon verified "
+            "credential theft or LSASS memory dumping with completed investigation."
+        ),
+    ),
+    PolicyRule(
+        policy_rule_id="POLICY-PHISHING-DOMAIN-SINKHOLE-001",
+        action_type=ResponseActionType.BLOCK_DOMAIN,
+        minimum_risk_level=RiskLevel.LOW,
+        minimum_confidence=0.80,
+        require_evidence=True,
+        require_investigation=False,
+        require_attribution=False,
+        requires_approval=False,
+        approval_above_risk_level=RiskLevel.HIGH,
+        enabled=True,
+        priority=5,
+        description=(
+            "Automated Threat Infrastructure Takedown: DNS blocking of confirmed "
+            "phishing and malware delivery domains with confidence >= 0.80."
+        ),
+    ),
+    PolicyRule(
+        policy_rule_id="POLICY-ROGUE-SESSION-TERMINATE-001",
+        action_type=ResponseActionType.TERMINATE_SESSION,
+        minimum_risk_level=RiskLevel.MEDIUM,
+        minimum_confidence=0.70,
+        require_evidence=True,
+        require_investigation=False,
+        require_attribution=False,
+        requires_approval=False,
+        approval_above_risk_level=RiskLevel.HIGH,
+        enabled=True,
+        priority=5,
+        description=(
+            "Zero Trust Session Governance: automated session termination for "
+            "unauthorized administrative access or remote shells."
+        ),
+    ),
+    PolicyRule(
+        policy_rule_id="POLICY-MALWARE-ACTIVE-QUARANTINE-001",
+        action_type=ResponseActionType.QUARANTINE_FILE,
+        minimum_risk_level=RiskLevel.MEDIUM,
+        minimum_confidence=0.80,
+        require_evidence=True,
+        require_investigation=False,
+        require_attribution=False,
+        requires_approval=True,
+        approval_above_risk_level=None,
+        enabled=True,
+        priority=5,
+        description=(
+            "Malicious Payload Quarantine: isolation of detected dropped executables, "
+            "reverse shell binaries, and web shells with confidence >= 0.80."
+        ),
+    ),
+)
+
+ALL_POLICY_RULES: tuple[PolicyRule, ...] = ENTERPRISE_POLICY_RULES + DEFAULT_POLICY_RULES
+
 
 def rule_ids() -> tuple[str, ...]:
     """All default rule ids in deterministic declaration order."""
     return tuple(rule.policy_rule_id for rule in DEFAULT_POLICY_RULES)
 
 
+def all_rule_ids() -> tuple[str, ...]:
+    """All policy rule ids including enterprise policies."""
+    return tuple(rule.policy_rule_id for rule in ALL_POLICY_RULES)
+
+
 __all__ = [
+    "ALL_POLICY_RULES",
     "DEFAULT_POLICY_RULES",
+    "ENTERPRISE_POLICY_RULES",
     "POLICY_NAME",
+    "all_rule_ids",
     "rule_ids",
 ]

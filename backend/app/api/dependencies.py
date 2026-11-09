@@ -78,6 +78,49 @@ def get_current_user(
     return user
 
 
+#: Standard role groupings across SentinelAI subsystems
+ALL_SOC_ROLES = (
+    "admin",
+    "analyst",
+    "ciso",
+    "soc_lead",
+    "incident_responder",
+    "threat_hunter",
+    "detection_engineer",
+    "security_auditor",
+)
+
+INCIDENT_RESPONSE_ROLES = (
+    "admin",
+    "ciso",
+    "soc_lead",
+    "incident_responder",
+    "analyst",
+)
+
+THREAT_HUNTING_ROLES = (
+    "admin",
+    "soc_lead",
+    "threat_hunter",
+    "analyst",
+    "ciso",
+)
+
+DETECTION_ENGINEERING_ROLES = (
+    "admin",
+    "soc_lead",
+    "detection_engineer",
+    "analyst",
+)
+
+GOVERNANCE_AUDIT_ROLES = (
+    "admin",
+    "ciso",
+    "soc_lead",
+    "security_auditor",
+)
+
+
 def require_role(*allowed_roles: str) -> Callable:
     """Dependency factory that restricts access to users with specific roles.
 

@@ -11,6 +11,7 @@ import { DataIngestPage } from '../pages/data-ingest-page'
 import { DetectionAsCodePage } from '../pages/detection-as-code-page'
 import { DetectionsPage } from '../pages/detections-page'
 import { DetectionRulesPage } from '../pages/detection-rules-page'
+import { DigitalTwinPage } from '../pages/digital-twin-page'
 import { IncidentDetailPage } from '../pages/incident-detail-page'
 import { IncidentReportsPage } from '../pages/incident-reports-page'
 import { KnowledgeGraphPage } from '../pages/knowledge-graph-page'
@@ -18,6 +19,7 @@ import { IncidentsPage } from '../pages/incidents-page'
 import { InvestigationsPage } from '../pages/investigations-page'
 import { LoginPage } from '../pages/login-page'
 import { NotFoundPage } from '../pages/not-found-page'
+import { PlaybooksPage } from '../pages/playbooks-page'
 import { PolicyPage } from '../pages/policy-page'
 import { PredictionPage } from '../pages/prediction-page'
 import { ResponsesPage } from '../pages/responses-page'
@@ -50,6 +52,9 @@ export const router = createBrowserRouter([
       { path: '/predictions', element: <PredictionPage /> },
       { path: '/predictions/correlation/:correlationId', element: <PredictionPage /> },
       { path: '/predictions/:predictionId', element: <PredictionPage /> },
+      { path: '/playbooks', element: <PlaybooksPage /> },
+      { path: '/playbooks/correlation/:correlationId', element: <PlaybooksPage /> },
+      { path: '/playbooks/:playbookId', element: <PlaybooksPage /> },
       { path: '/risk', element: <RiskPage /> },
       { path: '/threat-intelligence', element: <ThreatIntelPage /> },
       { path: '/investigations', element: <InvestigationsPage /> },
@@ -63,6 +68,7 @@ export const router = createBrowserRouter([
       { path: '/knowledge-graph/:correlationId', element: <KnowledgeGraphPage /> },
       { path: '/attack-paths', element: <AttackPathPage /> },
       { path: '/attack-paths/:correlationId', element: <AttackPathPage /> },
+      { path: '/digital-twin', element: <DigitalTwinPage /> },
       { path: '/system', element: <SystemPage /> },
       { path: '/audit', element: <AuditPage /> },
       { path: '/settings', element: <SettingsPage /> },

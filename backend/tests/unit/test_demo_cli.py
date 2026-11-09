@@ -322,6 +322,193 @@ def test_merging_keeps_the_oldest_audit_baseline():
 
 
 # ---------------------------------------------------------------------------
+# Demo evidence association
+# ---------------------------------------------------------------------------
+
+
+def test_threat_intelligence_reuses_the_correlation_member_event(monkeypatch):
+    """TI must analyze the event correlation actually persisted.
+
+    Re-collecting ``attack_chain.jsonl`` mints a fresh event UUID, so the
+    lookups are not associated with ``correlation_members.event_id`` and the
+    graph refresh cannot add indicator evidence.
+    """
+    from app.services.threat_intelligence.registry import ProviderRegistry
+
+    events, _ = runner.collect("00_full_soc_scenario", "attack_chain.jsonl")
+    normalized = [runner.normalize(event) for event in events]
+    matched = runner.detect_all(normalized, runner.build_registry())
+    correlations = runner.correlate(matched)
+    primary = max(correlations, key=lambda correlation: len(correlation.members))
+    member_event_ids = {
+        member.event_id
+        for correlation in correlations
+        for member in correlation.members
+    }
+
+    context = runner.ScenarioContext(cleanup=runner.Cleanup(), session=None)
+    context._loaded = True
+    context._normalized = normalized
+    context.correlations = correlations
+    context.correlation_id = str(primary.correlation_id)
+    context.intel_analyses = []
+
+    def _refuse_recollect(*_args, **_kwargs):
+        pytest.fail("TI re-collected the dataset instead of reusing the persisted event")
+
+    monkeypatch.setattr(runner, "collect", _refuse_recollect)
+    monkeypatch.setattr(
+        runner, "ti_registry", lambda: (ProviderRegistry([]), [])
+    )
+
+    report = runner.Report(command="threat_intelligence")
+    analyses = context.analyze_threat_intelligence(report)
+
+    assert analyses[0].event_id == primary.members[0].event_id
+    assert analyses[0].event_id in member_event_ids
+    assert not report.failed
+    assert any(item["check"] == "ti_extraction" for item in report.passed)
+
+
+def test_policy_scenarios_use_the_supplied_persisted_correlation():
+    import uuid
+
+    correlation_id = uuid.uuid4()
+    report = runner.Report(command="policy")
+    decisions = runner.run_policy_scenarios(
+        report,
+        only={"policy_block_ip_allow"},
+        correlation_id=correlation_id,
+    )
+
+    assert not report.failed
+    decision = decisions["policy_block_ip_allow"]
+    assert decision.correlation_id == correlation_id
+    assert {item.reference_id for item in decision.evidence} == {correlation_id}
+
+
+def test_policy_correlation_comes_from_the_persisted_context(monkeypatch):
+    import uuid
+
+    correlation_id = uuid.uuid4()
+
+    class _Context:
+        def ensure(self):
+            return self
+
+        def correlation_uuid(self):
+            return correlation_id
+
+    monkeypatch.setattr(runner, "ScenarioContext", lambda **_kwargs: _Context())
+    report = runner.Report(command="hitl")
+
+    resolved = runner._persisted_policy_correlation(
+        report, object(), runner.Cleanup(), "hitl/"
+    )
+
+    assert resolved == correlation_id
+    assert not report.failed
+
+
+def test_policy_correlation_reports_a_context_without_a_correlation(monkeypatch):
+    class _Context:
+        def ensure(self):
+            return self
+
+        def correlation_uuid(self):
+            raise ValueError("empty correlation id")
+
+    monkeypatch.setattr(runner, "ScenarioContext", lambda **_kwargs: _Context())
+    report = runner.Report(command="hitl")
+
+    resolved = runner._persisted_policy_correlation(
+        report, object(), runner.Cleanup(), "hitl/"
+    )
+
+    assert resolved is None
+    failures = [item for item in report.failed if item["check"] == "hitl/policy_correlation"]
+    assert failures
+    assert "fabricated" in failures[0]["note"]
+
+
+def test_policy_scenarios_refuse_to_fabricate_a_missing_correlation():
+    report = runner.Report(command="policy")
+    decisions = runner.run_policy_scenarios(
+        report, only={"policy_block_ip_allow"}
+    )
+
+    assert decisions == {}
+    failures = [item for item in report.failed if item["check"] == "policy_correlation"]
+    assert failures, "the missing correlation must be reported, not fabricated"
+    assert "fabricated" in failures[0]["note"]
+
+
+def _historical_memory_input():
+    from app.services.incident_memory.input import IncidentMemoryInput
+
+    data = runner.load_json("14_incident_memory", "historical_incident.json")
+    return IncidentMemoryInput(
+        **{key: value for key, value in data.items() if key != "schema"}
+    )
+
+
+def test_historical_memory_reports_an_unpersisted_correlation(monkeypatch):
+    """The closed-incident memory is kept, but never given a fake graph anchor."""
+    from app.repositories.correlation import CorrelationRepository
+
+    memory_input = _historical_memory_input()
+    monkeypatch.setattr(
+        CorrelationRepository, "get_by_correlation_id", lambda self, _cid: None
+    )
+
+    report = runner.Report(command="incident_memory")
+    runner._report_historical_memory_association(report, object(), memory_input)
+
+    skipped = [
+        item
+        for item in report.skipped
+        if item["check"] == "historical_correlation_association"
+    ]
+    assert skipped
+    assert "no top-level correlation anchor" in skipped[0]["note"]
+    assert "No fake correlation" in skipped[0]["note"]
+    assert skipped[0]["observed"]["cited_correlation_ids"] == [
+        "8f1a0c22-1000-4a10-9a01-0d0e0f101111"
+    ]
+    assert skipped[0]["observed"]["unpersisted_source_citations"] == [
+        "8f1a0c22-1000-4a10-9a01-0d0e0f101111"
+    ]
+    assert not report.failed
+
+
+def test_historical_memory_reports_a_persisted_correlation(monkeypatch):
+    import uuid
+
+    from app.repositories.correlation import CorrelationRepository
+
+    memory_input = _historical_memory_input()
+    anchor = uuid.uuid4()
+    memory_input = memory_input.model_copy(update={"correlation_id": anchor})
+    monkeypatch.setattr(
+        CorrelationRepository, "get_by_correlation_id", lambda self, _cid: object()
+    )
+
+    report = runner.Report(command="incident_memory")
+    runner._report_historical_memory_association(report, object(), memory_input)
+
+    passed = [
+        item
+        for item in report.passed
+        if item["check"] == "historical_correlation_association"
+    ]
+    assert passed
+    assert str(anchor) in passed[0]["observed"]["cited_correlation_ids"]
+    assert "8f1a0c22-1000-4a10-9a01-0d0e0f101111" in passed[0]["observed"][
+        "cited_correlation_ids"
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Determinism helpers
 # ---------------------------------------------------------------------------
 

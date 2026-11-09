@@ -47,6 +47,10 @@ Covered explicitly:
                                   is never touched directly; pages bounded
 19. architecture isolation       — AST: no framework / AI-provider / vector /
                                   graph / HTTP / dynamic-exec imports
+20. default dependency           — F-06: the default query-service factory
+                                  constructs the real query service (the
+                                  session is threaded per method, never
+                                  captured as the repository factory)
 """
 
 import ast
@@ -55,6 +59,7 @@ import json
 import pathlib
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -78,6 +83,7 @@ from app.schemas.incident_memory_query import (
     IncidentMemoryRecord,
 )
 from app.schemas.security_event import Provenance
+from app.repositories.incident_memory import IncidentMemoryRepository
 from app.services import incident_memory_learning as learning_mod
 from app.services.incident_memory_learning import (
     DEFAULT_MIN_OCCURRENCES,
@@ -1340,6 +1346,183 @@ class TestQueryBoundary:
         assert result.memory_count == 449
         assert [call["page"] for call in fake.calls] == [1, 2, 3]
         assert all(call["page_size"] == MAX_PAGE_SIZE for call in fake.calls)
+
+
+# ---------------------------------------------------------------------------
+# 20. Default dependency construction (F-06)
+# ---------------------------------------------------------------------------
+#
+# The shipped default ``query_service_factory`` used to be the
+# ``IncidentMemoryQueryService`` class itself.  ``consolidate`` calls
+# ``factory(db)``, so that constructed ``IncidentMemoryQueryService(db)`` —
+# whose first parameter is a *repository* factory — capturing the caller's
+# session and later invoking it as ``db(db)``.  The default path only ever
+# surfaced as ``IncidentMemoryLearningQueryError`` ("could not read incident
+# memories") once a caller reached it.  These tests pin the corrected default:
+# a factory that ignores ``db`` and returns the real, stateless query service,
+# with the session threaded to each query *method*.
+
+
+def _fake_row(**overrides):
+    """A repository-row double sufficient for ``_to_memory_record``."""
+    base = {
+        "id": uuid.uuid4(),
+        "memory_id": _mid(1),
+        "memory_type": MemoryType.INCIDENT_SUMMARY,
+        "title": "historical memory",
+        "summary": "summary of a historical incident",
+        "correlation_id": None,
+        "sources": [_source()],
+        "indicators": [_indicator()],
+        "entities": [],
+        "techniques": [],
+        "findings": [],
+        "actions": [],
+        "outcomes": {},
+        "memory_metadata": {},
+        "confidence": 0.9,
+        "provenance": Provenance.RECALLED.value,
+        "created_at": _TS0,
+        "updated_at": _TS0,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+class _FakeRepo:
+    """Repository double: records the session it was handed, serves rows."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+        self.seen_db = None
+
+    def count_memories(self, *, memory_type=None):
+        return len(self._rows)
+
+    def list_memories(self, *, limit, offset, memory_type=None):
+        return self._rows[offset : offset + limit]
+
+
+class _SessionDouble:
+    """A caller-owned session that fails if any lifecycle method is invoked.
+
+    The learning service must never own the transaction: it must not commit,
+    roll back, flush, close, add or delete.  Reaching any of those methods is
+    a hard failure.
+    """
+
+    _LIFECYCLE = frozenset(
+        {"commit", "rollback", "flush", "close", "add", "delete"}
+    )
+
+    def __init__(self):
+        object.__setattr__(self, "forbidden_calls", [])
+        object.__setattr__(self, "touched", [])
+
+    def __getattr__(self, name):
+        if name in self._LIFECYCLE:
+            def _reject(*_args, **_kwargs):
+                self.forbidden_calls.append(name)
+                raise AssertionError(f"learning must not call db.{name}()")
+            return _reject
+        raise AttributeError(name)
+
+
+class TestDefaultDependencyConstruction:
+    def test_default_factory_builds_real_query_service(self):
+        service = IncidentMemoryLearningService()
+        sentinel_db = object()
+        built = service._query_service_factory(sentinel_db)
+        assert isinstance(built, IncidentMemoryQueryService)
+
+    def test_default_factory_does_not_capture_session_as_repository(self):
+        """Regression: ``db`` must not become the repository factory.
+
+        The previous default passed the session into the query service's
+        ``repository_factory`` slot; here the real default repository factory
+        must still be in place.
+        """
+        service = IncidentMemoryLearningService()
+        built = service._query_service_factory(_SessionDouble())
+        assert built._repository_factory is IncidentMemoryRepository
+
+    def test_default_consolidation_path_with_repository_double(self, monkeypatch):
+        """The default factory drives the real query pipeline end-to-end.
+
+        Only the repository is doubled; the service, factory and
+        ``list_memories`` conversion path are real.
+        """
+        rows = [
+            _fake_row(memory_id=_mid(1), indicators=[_indicator()]),
+            _fake_row(memory_id=_mid(2), indicators=[_indicator()]),
+        ]
+        captured = {}
+
+        def _fake_repo(self, db):
+            captured["db"] = db
+            return _FakeRepo(rows)
+
+        monkeypatch.setattr(IncidentMemoryQueryService, "_repo", _fake_repo)
+        session = _SessionDouble()
+        service = IncidentMemoryLearningService()  # default factory
+        result = service.consolidate(
+            session, clock=_TS0, min_occurrences=1, uuid_factory=_uuid_factory()
+        )
+        assert result.memory_count == 2
+        assert result.record_count >= 1
+        # The single caller-owned session is threaded to the query service,
+        # which hands it to the repository — never to a constructor.
+        assert captured["db"] is session
+
+    def test_default_path_leaves_session_lifecycle_untouched(self, monkeypatch):
+        rows = [
+            _fake_row(memory_id=_mid(1), indicators=[_indicator()]),
+            _fake_row(memory_id=_mid(2), indicators=[_indicator()]),
+        ]
+        monkeypatch.setattr(
+            IncidentMemoryQueryService, "_repo", lambda self, db: _FakeRepo(rows)
+        )
+        session = _SessionDouble()
+        IncidentMemoryLearningService().consolidate(
+            session, clock=_TS0, min_occurrences=1, uuid_factory=_uuid_factory()
+        )
+        assert session.forbidden_calls == []
+
+    def test_explicit_injected_factory_is_used_unchanged(self):
+        """Explicit dependency injection and test doubles are preserved."""
+        fake = FakeQuery(
+            [_record(memory_id=_mid(1), indicators=[_indicator()])]
+        )
+        service = IncidentMemoryLearningService(
+            query_service_factory=lambda db: fake
+        )
+        result = service.consolidate(
+            object(), clock=_TS0, min_occurrences=1, uuid_factory=_uuid_factory()
+        )
+        assert fake.calls, "the injected double must serve the reads"
+        assert result.memory_count == 1
+
+    def test_default_path_sanitizes_query_service_failure(self, monkeypatch):
+        """A query-service failure on the default path stays sanitized."""
+
+        def _boom(self, db, **_kwargs):
+            raise RuntimeError("underlying database exploded")
+
+        monkeypatch.setattr(IncidentMemoryQueryService, "list_memories", _boom)
+        service = IncidentMemoryLearningService()  # default factory
+        with pytest.raises(IncidentMemoryLearningQueryError) as excinfo:
+            service.consolidate(object(), clock=_TS0)
+        assert isinstance(excinfo.value, IncidentMemoryLearningError)
+        assert "exploded" not in str(excinfo.value)
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    def test_default_factory_is_callable(self):
+        """The default value is an injectable callable, not the service class."""
+        default = (
+            IncidentMemoryLearningService.__init__.__defaults__[0]
+        )
+        assert callable(default)
+        assert default is not IncidentMemoryQueryService
 
 
 # ---------------------------------------------------------------------------

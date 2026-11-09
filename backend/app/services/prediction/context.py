@@ -120,26 +120,34 @@ def _attack_mapping(detection: DetectionResult) -> tuple[str | None, str | None,
     """
     evidence = detection.evidence if isinstance(detection.evidence, dict) else {}
     references = evidence.get("rule_references")
-    if not isinstance(references, dict):
-        return None, None, None
-
     technique_id: str | None = None
-    for key in _ATTACK_ID_KEYS:
-        technique_id = validate_technique_id(_as_str(references.get(key), 32))
-        if technique_id:
-            break
-
     name: str | None = None
-    for key in _ATTACK_NAME_KEYS:
-        name = _as_str(references.get(key), 128)
-        if name:
-            break
-
     tactic: str | None = None
-    for key in _ATTACK_TACTIC_KEYS:
-        tactic = _as_str(references.get(key), 64)
-        if tactic:
-            break
+
+    if isinstance(references, dict):
+        for key in _ATTACK_ID_KEYS:
+            technique_id = validate_technique_id(_as_str(references.get(key), 32))
+            if technique_id:
+                break
+
+        for key in _ATTACK_NAME_KEYS:
+            name = _as_str(references.get(key), 128)
+            if name:
+                break
+
+        for key in _ATTACK_TACTIC_KEYS:
+            tactic = _as_str(references.get(key), 64)
+            if tactic:
+                break
+
+    if not technique_id and detection.rule_id:
+        from app.services.mitre.mapping import get_mitre_techniques_for_rule
+        techs = get_mitre_techniques_for_rule(str(detection.rule_id))
+        if techs:
+            tech = techs[0]
+            technique_id = validate_technique_id(tech.technique_id)
+            name = name or tech.name
+            tactic = tactic or tech.tactic
 
     return technique_id, name, tactic
 

@@ -14,9 +14,17 @@ are written by
 :class:`~app.services.detection_persistence.DetectionPersistenceService`
 (which owns the transaction).
 
-No Kafka is involved: the transport is intentionally omitted so ingestion
-can run in environments without a broker, while every other stage remains
-the real implementation.
+Kafka is the production transport: :class:`~app.kafka.worker.KafkaIngestionWorker`
+consumes ``security-events`` and drives every message through
+:class:`EventIngestPipeline`, the same normalize -> detect -> persist path
+described above.  The transport remains optional so ingestion can also run
+in broker-less environments (CLI/HTTP) without changing any other stage.
+
+Threat-intelligence enrichment is an *optional* post-detection stage on both
+:func:`ingest_jsonl` and :class:`EventIngestPipeline` (see
+:class:`EventEnricher` and :mod:`app.services.threat_intel_enrichment`).  It is
+disabled by default, only runs when an enricher is explicitly injected, and is
+invoked strictly after detection persistence commits.
 
 SentinelAI has no security-event store, so the normalized events produced
 here are not persisted.  Because the normalization output would otherwise be
@@ -34,7 +42,7 @@ import logging
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, Field, computed_field
@@ -49,6 +57,7 @@ from app.schemas.normalized_event import (
     NormalizedSecurityEvent,
 )
 from app.schemas.security_event import Provenance, SecurityEvent, SourceType
+from app.services.detection.registry import DetectionRuleRegistry
 from app.services.detection_as_code.lifecycle import LifecycleService
 from app.services.detection_persistence import DetectionPersistenceService
 
@@ -501,6 +510,7 @@ def ingest_jsonl(
     content: str,
     *,
     max_events: int = MAX_EVENTS,
+    enrichment: EventEnricher | None = None,
 ) -> IngestSummary:
     """Ingest JSON Lines *content* through the full detection pipeline.
 
@@ -508,6 +518,10 @@ def ingest_jsonl(
         db: Session used for the registry snapshot and persistence.
         content: Raw JSON Lines text.
         max_events: Cap on accepted events for this run.
+        enrichment: Optional post-detection collaborator.  When supplied it is
+            invoked once per successfully processed event, after that event's
+            detections have been persisted.  Its failures are isolated and
+            never change the event's accepted/detected status.
 
     Returns:
         An :class:`IngestSummary` describing the run, including up to
@@ -625,6 +639,11 @@ def ingest_jsonl(
                     result.severity,
                 )
 
+        if enrichment is not None:
+            _run_enrichment_isolated(
+                db, enrichment, normalized, event.event_id
+            )
+
     duration_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
         "Ingest complete records=%d accepted=%d processed=%d detections=%d "
@@ -653,3 +672,173 @@ def ingest_jsonl(
         truncated_events=normalized_count > len(events),
         duration_ms=duration_ms,
     )
+
+
+class EventEnricher(Protocol):
+    """Optional post-detection collaborator for :class:`EventIngestPipeline`.
+
+    Implemented by
+    :class:`~app.services.threat_intel_enrichment.ThreatIntelEnricher`.  It is
+    invoked with the caller-owned session and the normalized event *after*
+    detections have been persisted, and it owns its own transaction.  A
+    protocol (rather than the concrete type) keeps this module free of any
+    dependency on the optional threat-intelligence wiring.
+    """
+
+    def enrich(
+        self, db: Session, event: NormalizedSecurityEvent
+    ) -> object: ...
+
+
+def _run_enrichment_isolated(
+    db: Session,
+    enrichment: EventEnricher,
+    normalized: NormalizedSecurityEvent,
+    event_id: UUID,
+) -> None:
+    """Run one post-detection enrichment, isolating its failures.
+
+    Detection persistence has already committed by the time this is called, so
+    an enrichment/provider failure can never roll back or hide detection
+    results.  Failures are logged with the exception *type* only -- no message,
+    credentials, or payload -- and swallowed so the caller still treats the
+    event as successfully processed.
+    """
+    started = time.perf_counter()
+    try:
+        enrichment.enrich(db, normalized)
+    except Exception as exc:  # noqa: BLE001 - enrichment must not fail ingest
+        logger.warning(
+            "Post-detection enrichment failed for event=%s: %s "
+            "(detection results already persisted; left unchanged)",
+            event_id,
+            type(exc).__name__,
+        )
+        return
+    logger.info(
+        "Post-detection enrichment completed for event=%s in %d ms",
+        event_id,
+        int((time.perf_counter() - started) * 1000),
+    )
+
+
+class EventIngestResult(BaseModel):
+    """Outcome of processing one already-validated :class:`SecurityEvent`."""
+
+    event_id: UUID = Field(
+        ...,
+        description="Identity carried over from the processed event.",
+    )
+    detections: int = Field(
+        ...,
+        description="Rules that matched this event.",
+    )
+    detection_results_created: int = Field(
+        ...,
+        description="Rows written to detection_results for this event.",
+    )
+    rule_failures: int = Field(
+        ...,
+        description="Rule evaluations that errored (fail-closed per rule).",
+    )
+
+
+class EventIngestPipeline:
+    """Per-event counterpart of :func:`ingest_jsonl`.
+
+    Processes one already-validated :class:`SecurityEvent` (for example one
+    deserialized from Kafka) through the exact same governed stages as the
+    file/HTTP path -- normalization, explicit-field application, detection,
+    and persistence -- so a streaming consumer can never diverge from the
+    terminal and browser entry points.
+
+    The unittest-friendly design mirrors the file path: the governed rule
+    registry is rebuilt once by the caller and injected, so an event stream
+    does not pay for a registry rebuild per event.  The caller owns the
+    database session; persistence commits atomically per analysis.
+
+    This class adds no new pipeline logic.  It only wires the existing
+    :class:`~app.agents.normalization.NormalizationAgent`,
+    :func:`apply_explicit_fields`,
+    :class:`~app.agents.detection.DetectionAgent`, and
+    :func:`~app.agents.detection.persist_analysis_bound` together for a
+    single event -- the same four edges :func:`ingest_jsonl` uses.
+
+    An optional *enrichment* collaborator (see :class:`EventEnricher`) can be
+    injected to run threat-intelligence enrichment *after* detections are
+    persisted.  It is opt-in: with ``enrichment=None`` (the default) this class
+    behaves exactly as before and no provider client is constructed.
+    """
+
+    def __init__(
+        self,
+        db: Session,
+        registry: DetectionRuleRegistry,
+        *,
+        persistence: DetectionPersistenceService | None = None,
+        enrichment: EventEnricher | None = None,
+    ) -> None:
+        self._db = db
+        self._normalizer = NormalizationAgent()
+        self._agent = DetectionAgent(registry=registry)
+        self._persist = persist_analysis_bound(
+            db, service=persistence or DetectionPersistenceService()
+        )
+        self._enrichment = enrichment
+
+    def process(self, event: SecurityEvent) -> EventIngestResult:
+        """Run one event through normalize -> detect -> persist [-> enrich].
+
+        Args:
+            event: An already-validated :class:`SecurityEvent`.
+
+        Returns:
+            An :class:`EventIngestResult` counting matches and rows written.
+
+        Raises:
+            Exception: Anything the pipeline raises (rule-set, detection, or
+                persistence failure) propagates unchanged.  Nothing is
+                swallowed, and persistence owns its own atomic transaction, so
+                a failure leaves no partial state for the caller to unwind.
+                The optional enrichment stage is the one exception: it runs
+                only after persistence succeeds and its failures are isolated
+                (logged, then swallowed) so enrichment can never undo a
+                detection.
+        """
+        captured: dict[str, object] = {}
+
+        def _capturing_persist(analysis):
+            outcome = self._persist(analysis)
+            captured["outcome"] = outcome
+            return outcome
+
+        normalized = self._normalizer.normalize(event)
+        normalized = apply_explicit_fields(event, normalized)
+        analysis = self._agent.evaluate(
+            normalized, persistence=_capturing_persist
+        )
+
+        outcome = captured.get("outcome")
+        matched = [r for r in analysis.results if r.matched]
+        result = EventIngestResult(
+            event_id=event.event_id,
+            detections=len(matched),
+            detection_results_created=int(
+                getattr(outcome, "results_created", 0) or 0
+            ),
+            rule_failures=len(analysis.failures),
+        )
+
+        if self._enrichment is not None:
+            self._run_enrichment(normalized, result)
+
+        return result
+
+    def _run_enrichment(
+        self, normalized: NormalizedSecurityEvent, result: EventIngestResult
+    ) -> None:
+        """Delegate to the shared, failure-isolated enrichment helper."""
+        assert self._enrichment is not None
+        _run_enrichment_isolated(
+            self._db, self._enrichment, normalized, result.event_id
+        )

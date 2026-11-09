@@ -19,7 +19,10 @@ the frontend talks to.  ``--clean`` removes only the rows this run created and
 verifies the database is back at its pre-demo row totals.
 
 Exit codes: ``0`` success, ``1`` one or more stages failed (or cleanup left
-drift), ``2`` invalid arguments.
+drift), ``2`` invalid arguments.  ``build-knowledge-graph`` additionally
+exits ``1`` when materialization failures occurred or when a scan capped by
+``--max-correlations`` left correlations unexamined (the two outcomes are
+reported distinctly in its payload).
 """
 
 from __future__ import annotations
@@ -758,12 +761,30 @@ def _build_knowledge_graph(args: Any) -> dict[str, Any]:
     from app.database.postgres.session import SessionLocal
     from app.services.knowledge_graph.builder import KnowledgeGraphBuilder
 
-    builder = KnowledgeGraphBuilder(
-        max_correlations=max(1, int(getattr(args, "max_correlations", 500))),
-        prune=bool(getattr(args, "all", False)),
-    )
+    max_correlations = max(1, int(getattr(args, "max_correlations", 500)))
     session = SessionLocal()
     try:
+        reconcile = bool(getattr(args, "reconcile", False))
+        if reconcile or getattr(args, "missing", False):
+            # Recovery modes: no persistent maintenance state is required.  A
+            # correlation with no graph is found by diffing V2 rows against the
+            # graph; `--reconcile` additionally re-derives and refreshes
+            # correlations whose supporting evidence arrived after the build.
+            from app.services.knowledge_graph.materialization import (
+                reconcile_correlation_graphs,
+            )
+
+            summary = reconcile_correlation_graphs(
+                session,
+                limit=max_correlations,
+                include_stale=reconcile,
+            )
+            return summary.as_build_dict("reconcile" if reconcile else "missing")
+
+        builder = KnowledgeGraphBuilder(
+            max_correlations=max_correlations,
+            prune=bool(getattr(args, "all", False)),
+        )
         if getattr(args, "correlation_id", None):
             result = builder.build_for_correlation(session, args.correlation_id)
         else:
@@ -773,10 +794,37 @@ def _build_knowledge_graph(args: Any) -> dict[str, Any]:
         session.close()
 
 
+def _knowledge_graph_exit_code(payload: dict[str, Any]) -> int:
+    """CLI exit status for one ``build-knowledge-graph`` payload.
+
+    * ``0`` — every examined correlation materialized and the scan covered
+      the whole graph (no unexamined work remained).
+    * ``1`` — at least one materialization failed, *or* the scan was capped
+      by ``--max-correlations`` and correlations remain unexamined.  The two
+      outcomes stay distinct in the payload (``failed_count`` /
+      ``failed_correlation_ids`` vs. ``truncated`` / ``unexamined_count`` /
+      ``status`` of ``FAIL`` vs. ``PARTIAL``) even though both are non-zero,
+      so automation can tell "retry these ids" from "raise the cap".
+    """
+    if int(payload.get("failed_count") or 0) > 0:
+        return 1
+    if payload.get("truncated"):
+        return 1
+    return 0
+
+
 def _render_text_build_knowledge_graph(payload: dict[str, Any]) -> str:
-    """Render a build summary. Never prints credential material."""
+    """Render a build summary. Never prints credential material.
+
+    Reports the same outcome as the JSON payload: the status, materialization
+    failures (with the retry hint), and scan truncation with the number of
+    correlations that remain unexamined.
+    """
+    from app.services.knowledge_graph.materialization import RETRY_HINT
+
     lines = [
         "V3.22 knowledge graph build (evidence-backed; no LLM, no inference)",
+        f"  status           : {payload.get('status', 'PASS')}",
         f"  scope            : {payload.get('scope')}",
         f"  correlations     : {payload.get('correlation_count')}",
         f"  nodes            : {payload.get('node_count')} "
@@ -788,11 +836,153 @@ def _render_text_build_knowledge_graph(payload: dict[str, Any]) -> str:
         f"  truncated        : {payload.get('truncated')}"
         + (f" ({payload.get('truncated_reason')})" if payload.get("truncated") else ""),
     ]
+    if payload.get("truncated") and payload.get("unexamined_count") is not None:
+        lines.append(
+            f"  unexamined       : {payload['unexamined_count']} correlation(s) "
+            f"beyond the --max-correlations scan cap "
+            f"(examined {payload.get('examined_count')} of "
+            f"{payload.get('total_correlations')})"
+        )
+    failed_ids = payload.get("failed_correlation_ids") or []
+    if payload.get("failed_count"):
+        lines.append(
+            f"  failed           : {payload['failed_count']} correlation(s) "
+            f"failed to materialize: {', '.join(failed_ids)}"
+        )
+        lines.append(
+            f"  retry            : {RETRY_HINT} <correlation-id> "
+            "(one per failed id)"
+        )
     if payload.get("correlation_ids"):
         shown = payload["correlation_ids"][:5]
         lines.append(f"  correlation ids  : {', '.join(shown)}"
                      + (" ..." if len(payload["correlation_ids"]) > 5 else ""))
     lines.append(f"  note             : {payload.get('note')}")
+    return "\n".join(lines)
+
+
+def _run_kafka_consumer(args: Any) -> dict[str, Any]:
+    """Run the Kafka ingestion worker until stopped or ``--max-messages``.
+
+    Consumes ``security-events`` and routes each event through the same
+    normalize -> detect -> persist pipeline the HTTP/CLI ingestion uses
+    (:class:`~app.services.ingest_service.EventIngestPipeline`).  The governed
+    rule set is rebuilt once at startup and reused for every event.  Offsets
+    are committed only after an event is persisted or dead-lettered.
+    """
+    from app.core.config import settings
+    from app.database.postgres.session import SessionLocal
+    from app.kafka.consumer import KafkaEventConsumer
+    from app.kafka.dlq import KafkaDeadLetterPublisher
+    from app.kafka.topics import ensure_topics
+    from app.kafka.worker import KafkaIngestionWorker
+    from app.services.ingest_service import (
+        EventIngestPipeline,
+        build_active_registry,
+    )
+
+    topic = settings.kafka_security_events_topic
+    dlq_topic = settings.kafka_security_events_dlq_topic
+    group = getattr(args, "group", None) or settings.kafka_consumer_group
+    max_retries = (
+        args.max_retries
+        if getattr(args, "max_retries", None) is not None
+        else settings.kafka_consumer_max_retries
+    )
+    retry_backoff = (
+        args.retry_backoff
+        if getattr(args, "retry_backoff", None) is not None
+        else settings.kafka_consumer_retry_backoff_seconds
+    )
+
+    topics_created: list[str] = []
+    if not getattr(args, "no_create_topics", False):
+        topics_created = ensure_topics(
+            settings.kafka_bootstrap_servers, [topic, dlq_topic]
+        )
+
+    # Rebuild the governed rule set once; reused for every consumed event.
+    session = SessionLocal()
+    try:
+        registry = build_active_registry(session)
+    finally:
+        session.close()
+
+    # Threat-intelligence enrichment is opt-in.  When enabled, the provider
+    # registry and agents are built ONCE here and reused for every event via a
+    # bound pipeline factory (the worker itself is unchanged, and its
+    # (db, registry) factory contract is preserved).
+    pipeline_factory = EventIngestPipeline
+    enrichment_enabled = settings.threat_intel_enrichment_enabled
+    enrichment_skipped: list[str] = []
+    if enrichment_enabled:
+        from functools import partial
+
+        from app.services.threat_intel_enrichment import (
+            build_threat_intel_enricher,
+        )
+
+        enricher, enrichment_skipped = build_threat_intel_enricher()
+        pipeline_factory = partial(EventIngestPipeline, enrichment=enricher)
+
+    consumer = KafkaEventConsumer(
+        settings.kafka_bootstrap_servers, topic, group
+    )
+    dead_letter = KafkaDeadLetterPublisher(
+        settings.kafka_bootstrap_servers, dlq_topic
+    )
+    worker = KafkaIngestionWorker(
+        consumer=consumer,
+        dead_letter=dead_letter,
+        session_factory=SessionLocal,
+        registry=registry,
+        pipeline_factory=pipeline_factory,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff,
+        poll_timeout_ms=getattr(args, "poll_timeout_ms", 1000),
+    )
+    try:
+        report = worker.run(
+            max_messages=getattr(args, "max_messages", None)
+        )
+    finally:
+        worker.close()
+
+    payload = report.as_dict()
+    payload.update(
+        {
+            "topic": topic,
+            "group": group,
+            "dead_letter_topic": dlq_topic,
+            "topics_created": topics_created,
+            "threat_intel_enrichment_enabled": enrichment_enabled,
+            "threat_intel_providers_skipped": enrichment_skipped,
+        }
+    )
+    return payload
+
+
+def _render_text_kafka_consumer(payload: dict[str, Any]) -> str:
+    lines = [
+        "SENTINELAI KAFKA INGESTION WORKER",
+        f"  topic            : {payload.get('topic')}",
+        f"  group            : {payload.get('group')}",
+        f"  dead-letter topic: {payload.get('dead_letter_topic')}",
+        f"  topics created   : {', '.join(payload.get('topics_created') or []) or '(none)'}",
+        "",
+        f"  poll cycles      : {payload.get('poll_cycles')}",
+        f"  records consumed : {payload.get('records_consumed')}",
+        f"  events processed : {payload.get('events_processed')}",
+        f"  duplicates skipped: {payload.get('events_skipped_duplicate')}",
+        f"  detection rows   : {payload.get('detection_results_created')}",
+        f"  invalid messages : {payload.get('invalid_messages')}",
+        f"  processing failures: {payload.get('processing_failures')}",
+        f"  dead-lettered    : {payload.get('dead_lettered')}",
+        f"  TI enrichment    : {'on' if payload.get('threat_intel_enrichment_enabled') else 'off'}",
+    ]
+    skipped = payload.get("threat_intel_providers_skipped") or []
+    if skipped:
+        lines.append(f"  TI providers skipped: {', '.join(skipped)}")
     return "\n".join(lines)
 
 
@@ -834,9 +1024,59 @@ def main(argv: Sequence[str] | None = None) -> int:
     scope.add_argument("--correlation-id", help="build only this correlation's subgraph")
     scope.add_argument("--all", action="store_true",
                        help="build the whole graph and prune rows no longer derivable")
+    scope.add_argument(
+        "--missing",
+        action="store_true",
+        help="recovery: materialize only correlations that have no graph yet "
+             "(never prunes; no maintenance state required)",
+    )
+    scope.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="recovery: materialize correlations that are missing or whose graph "
+             "is stale because supporting evidence arrived later (never prunes)",
+    )
     build_graph.add_argument("--max-correlations", type=int, default=500,
                              help="cap on correlations materialized in one full build")
     build_graph.add_argument("--json", action="store_true", help="emit JSON, not text")
+
+    consume = sub.add_parser(
+        "consume-events",
+        help="run the Kafka ingestion worker (consume -> normalize -> detect -> persist)",
+    )
+    consume.add_argument("--group", help="override the Kafka consumer group id")
+    consume.add_argument(
+        "--max-messages",
+        type=int,
+        default=None,
+        help="stop after N records (default: run until stopped)",
+    )
+    consume.add_argument(
+        "--max-retries",
+        type=int,
+        default=None,
+        help="in-process attempts per event before dead-lettering "
+             "(default: settings.kafka_consumer_max_retries)",
+    )
+    consume.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=None,
+        help="base backoff seconds between retries "
+             "(default: settings.kafka_consumer_retry_backoff_seconds)",
+    )
+    consume.add_argument(
+        "--poll-timeout-ms",
+        type=int,
+        default=1000,
+        help="broker poll timeout per cycle in milliseconds",
+    )
+    consume.add_argument(
+        "--no-create-topics",
+        action="store_true",
+        help="do not create missing topics at startup",
+    )
+    consume.add_argument("--json", action="store_true", help="emit JSON, not text")
 
     args = parser.parse_args(argv)
     if args.command == "build-knowledge-graph":
@@ -850,7 +1090,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, indent=2, default=str))
         else:
             print(_render_text_build_knowledge_graph(payload))
-        return 0
+        return _knowledge_graph_exit_code(payload)
     if args.command == "seed-demo-users":
         try:
             payload = _seed_demo_users(args)
@@ -861,6 +1101,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, indent=2, default=str))
         else:
             print(_render_text_seed_demo_users(payload))
+        return 0
+    if args.command == "consume-events":
+        try:
+            payload = _run_kafka_consumer(args)
+        except KeyboardInterrupt:
+            print("\nkafka consumer stopped", file=sys.stderr)
+            return 130
+        except Exception as exc:  # noqa: BLE001 - fail loudly with an exit code
+            print(f"consume-events failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(payload, indent=2, default=str))
+        else:
+            print(_render_text_kafka_consumer(payload))
         return 0
     if args.command != "demo":
         parser.print_help()

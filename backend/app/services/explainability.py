@@ -93,6 +93,7 @@ from app.schemas.security_event import Provenance
 from app.services.correlation_query import CorrelationQueryService
 from app.services.detection_query import DetectionQueryService
 from app.services.incident_memory_query import IncidentMemoryQueryService
+from app.services.mitre.mapping import get_mitre_techniques_for_rule
 from app.services.risk_query import RiskQueryService
 
 logger = logging.getLogger(__name__)
@@ -739,13 +740,33 @@ class ExplainabilityService:
         techniques: dict[str, list[uuid.UUID]] = {}
         for row in detection_records:
             meta = row.result_metadata or {}
-            label = None
+            ev = row.evidence or {}
+            labels: list[str] = []
+
+            # 1. Check detection result metadata
             if isinstance(meta, dict):
-                label = meta.get("mitre_technique") or meta.get("technique_id")
-            if isinstance(label, str) and label.strip():
-                techniques.setdefault(label.strip(), []).append(
+                label_val = meta.get("mitre_technique") or meta.get("technique_id")
+                if isinstance(label_val, str) and label_val.strip():
+                    labels.append(label_val.strip())
+
+            # 2. Check structured evidence references
+            if isinstance(ev, dict):
+                refs_obj = ev.get("rule_references") or {}
+                if isinstance(refs_obj, dict):
+                    attack_val = refs_obj.get("attack") or refs_obj.get("mitre") or refs_obj.get("technique")
+                    if isinstance(attack_val, str) and attack_val.strip():
+                        labels.append(attack_val.strip())
+
+            # 3. Check authoritative MITRE catalog mapping for known rules
+            catalog_techs = get_mitre_techniques_for_rule(row.rule_id)
+            for t in catalog_techs:
+                labels.append(t.to_claim_text())
+
+            for label in labels:
+                techniques.setdefault(label, []).append(
                     _coerce_uuid(row.detection_id)
                 )
+
         if not techniques:
             return DimensionExplanation(
                 dimension=ExplanationDimension.MITRE,
@@ -763,7 +784,7 @@ class ExplainabilityService:
             )
         claims = [
             ExplanationClaim(
-                text=f"Technique {label} reported by detections",
+                text=label if label.startswith("Technique ") else f"Technique {label} reported by detections",
                 evidence_ids=[],
             )
             for label in sorted(techniques)
@@ -775,7 +796,7 @@ class ExplainabilityService:
             dimension=ExplanationDimension.MITRE,
             coverage=DimensionCoverage.GROUNDED,
             title="MITRE ATT&CK",
-            summary="Technique labels reported by the persisted detections.",
+            summary="Authoritative techniques and tactics mapped from matched detection rules.",
             provenance=Provenance.DETECTED,
             claims=claims,
             reference_ids=sorted(set(refs)),

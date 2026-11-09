@@ -9,6 +9,7 @@ evidence" untestable, which is the main claim this version makes.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 import pytest
 from sqlalchemy import delete, func, select
@@ -332,6 +333,26 @@ def test_repeating_the_post_returns_the_same_session_without_a_second_row(
         select(func.count()).select_from(AttackPredictionSessionRecord)
     ).scalar_one()
     assert count == 1
+
+
+def test_created_at_is_recorded_and_stable_across_reads(
+    client, admin_token, prediction_correlation
+):
+    """The result timestamp is the persisted row time, not a generated value."""
+    created = client.post(
+        f"{BASE}/{prediction_correlation['correlation_id']}",
+        headers=auth_header(admin_token),
+    ).json()
+    assert created["created_at"]
+    recorded_at = datetime.fromisoformat(created["created_at"])
+    assert recorded_at.tzinfo is not None
+
+    fetched = client.get(
+        f"{BASE}/{created['predictions'][0]['prediction_id']}",
+        headers=auth_header(admin_token),
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["created_at"] == created["created_at"]
 
 
 def test_get_returns_the_session_document_a_prediction_belongs_to(

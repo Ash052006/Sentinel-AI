@@ -1,5 +1,7 @@
 import { api } from './client'
 import type {
+  ManualLookupRequest,
+  ManualLookupResponse,
   ThreatIntelIndicatorDetail,
   ThreatIntelIndicatorEvents,
   ThreatIntelIndicatorPage,
@@ -7,11 +9,9 @@ import type {
 } from '../types/api'
 
 /**
- * Threat Intelligence read client.
+ * Threat Intelligence client.
  *
- * Read-only by contract: there is no `create`, `update`, or `delete` here,
- * mirroring the backend, which exposes only `GET` routes.  Indicators and
- * lookups are created by the Threat Intelligence Agent, never over HTTP.
+ * Exposes indicator query endpoints and manual indicator lookup.
  */
 export const threatIntelligenceApi = {
   listIndicators: (
@@ -36,6 +36,9 @@ export const threatIntelligenceApi = {
     api.get<ThreatIntelIndicatorEvents>(
       `/api/threat-intelligence/indicators/${encodeURIComponent(indicatorId)}/events`,
     ),
+
+  manualLookup: (payload: ManualLookupRequest): Promise<ManualLookupResponse> =>
+    api.post<ManualLookupResponse>('/api/v1/threat-intelligence/lookup', payload),
 }
 
 export type { ThreatIntelIndicatorRecord }

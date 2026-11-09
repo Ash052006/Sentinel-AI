@@ -162,6 +162,107 @@ def _seed_definitions() -> list[SoarPlaybookDefinition]:
                 ),
             ],
         ),
+        SoarPlaybookDefinition(
+            playbook_id="ransomware_rapid_response",
+            name="Ransomware rapid response",
+            description=(
+                "Emergency containment: immediately isolate the infected endpoint, "
+                "terminate active encryption/command processes, and sever outbound "
+                "command-and-control communication at the firewall."
+            ),
+            primary_action=ResponseActionType.ISOLATE_ENDPOINT,
+            failure_policy=SoarFailurePolicy.STOP_ON_FAILURE,
+            steps=[
+                SoarStep(
+                    step_number=1,
+                    label="Emergency isolate endpoint",
+                    provider_id="edr",
+                    operation=ResponseActionType.ISOLATE_ENDPOINT,
+                    target=None,
+                    retries=0,
+                    timeout_seconds=30,
+                ),
+                SoarStep(
+                    step_number=2,
+                    label="Terminate malicious session",
+                    provider_id="edr",
+                    operation=ResponseActionType.TERMINATE_SESSION,
+                    target="session-crypto-lock",
+                    retries=0,
+                    timeout_seconds=30,
+                ),
+                SoarStep(
+                    step_number=3,
+                    label="Sever outbound C2 IP",
+                    provider_id="firewall",
+                    operation=ResponseActionType.BLOCK_IP,
+                    target="198.51.100.8",
+                    retries=1,
+                    timeout_seconds=30,
+                ),
+            ],
+        ),
+        SoarPlaybookDefinition(
+            playbook_id="credential_theft_mitigation",
+            name="Credential theft mitigation",
+            description=(
+                "Account security response: disable the targeted user account "
+                "at the identity provider and terminate active sessions to stop "
+                "credential misuse and lateral movement."
+            ),
+            primary_action=ResponseActionType.DISABLE_ACCOUNT,
+            failure_policy=SoarFailurePolicy.STOP_ON_FAILURE,
+            steps=[
+                SoarStep(
+                    step_number=1,
+                    label="Disable compromised account",
+                    provider_id="identity",
+                    operation=ResponseActionType.DISABLE_ACCOUNT,
+                    target=None,
+                    retries=0,
+                    timeout_seconds=30,
+                ),
+                SoarStep(
+                    step_number=2,
+                    label="Terminate active user session",
+                    provider_id="edr",
+                    operation=ResponseActionType.TERMINATE_SESSION,
+                    target="session-compromised-user",
+                    retries=0,
+                    timeout_seconds=30,
+                ),
+            ],
+        ),
+        SoarPlaybookDefinition(
+            playbook_id="c2_infrastructure_takedown",
+            name="C2 infrastructure takedown",
+            description=(
+                "Multi-layered perimeter defense: block the malicious command-and-control "
+                "domain and sever communication with the resolved upstream server IP."
+            ),
+            primary_action=ResponseActionType.BLOCK_DOMAIN,
+            failure_policy=SoarFailurePolicy.STOP_ON_FAILURE,
+            steps=[
+                SoarStep(
+                    step_number=1,
+                    label="Block C2 domain at firewall",
+                    provider_id="firewall",
+                    operation=ResponseActionType.BLOCK_DOMAIN,
+                    target=None,
+                    retries=0,
+                    timeout_seconds=30,
+                ),
+                SoarStep(
+                    step_number=2,
+                    label="Block C2 host IP at firewall",
+                    provider_id="firewall",
+                    operation=ResponseActionType.BLOCK_IP,
+                    target="198.51.100.9",
+                    retries=1,
+                    timeout_seconds=30,
+                ),
+            ],
+        ),
     ]
 
 

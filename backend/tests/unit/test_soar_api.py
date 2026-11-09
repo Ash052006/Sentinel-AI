@@ -161,11 +161,12 @@ class TestPlaybooks:
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["total"] == 7
+        assert body["total"] == 10
         assert body["page"] == 1
         ids = {item["playbook_id"] for item in body["items"]}
         assert "block_ip" in ids
         assert "endpoint_containment" in ids
+        assert "ransomware_rapid_response" in ids
 
     def test_get_one_playbook_includes_steps(
         self, client: TestClient, admin_token: str

@@ -107,7 +107,7 @@ class SimulatedAsset(UUIDTimestampMixin, Base):
         Index("ix_sim_asset_env", "environment_id"),
         Index("ix_sim_asset_category", "asset_category"),
         CheckConstraint(
-            f"asset_category IN {_ASSET_CATS!r}".replace("'", ""),
+            f"asset_category IN ({', '.join(repr(v) for v in _ASSET_CATS)})",
             name="sim_asset_category_valid",
         ),
         CheckConstraint(f"provenance = '{_SIM_PROV}'", name="sim_asset_prov_synthetic"),
@@ -250,7 +250,7 @@ class SimulationRun(UUIDTimestampMixin, Base):
         Index("ix_dtrun_snap", "snapshot_id"),
         Index("ix_dtrun_lifecycle", "lifecycle"),
         CheckConstraint(
-            f"lifecycle IN {_SIM_LC!r}".replace("'", ""),
+            f"lifecycle IN ({', '.join(repr(v) for v in _SIM_LC)})",
             name="dtrun_lifecycle_valid",
         ),
         CheckConstraint(f"provenance = '{_SIM_PROV}'", name="dtrun_prov_synthetic"),
@@ -307,7 +307,7 @@ class SimulatedActionOutcome(UUIDTimestampMixin, Base):
         Index("ix_dtao_run", "run_id"),
         Index("ix_dtao_target", "simulated_target_id"),
         CheckConstraint(
-            f"outcome IN {_ACT_OUT!r}".replace("'", ""),
+            f"outcome IN ({', '.join(repr(v) for v in _ACT_OUT)})",
             name="dtao_outcome_valid",
         ),
         CheckConstraint(f"provenance = '{_SIM_PROV}'", name="dtao_prov_synthetic"),

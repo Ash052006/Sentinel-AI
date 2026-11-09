@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, MessagesSquare, Network, Share2 } from 'lucide-react'
+import { ChevronLeft, ClipboardList, MessagesSquare, Network, Radar, Share2 } from 'lucide-react'
 import { correlationsApi } from '../api/correlations'
 import { risksApi } from '../api/risks'
 import { memoriesApi } from '../api/memories'
@@ -70,6 +70,18 @@ export function CorrelationDetailPage() {
           <Link to={`/debates/correlation/${core.correlation_id}`}>
             <MessagesSquare className="h-3.5 w-3.5" />
             Run agent debate
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/predictions/correlation/${core.correlation_id}`}>
+            <Radar className="h-3.5 w-3.5" />
+            Predictions
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/playbooks/correlation/${core.correlation_id}`}>
+            <ClipboardList className="h-3.5 w-3.5" />
+            Response playbook
           </Link>
         </Button>
         <Button asChild variant="outline" size="sm">

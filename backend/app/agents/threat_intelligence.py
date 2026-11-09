@@ -61,6 +61,8 @@ from typing import Callable, Protocol
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+
 from app.schemas.enriched_event import EnrichedSecurityEvent
 from app.schemas.normalized_event import NormalizedSecurityEvent
 from app.schemas.threat_intelligence_agent import (
@@ -79,6 +81,7 @@ from app.services.threat_intelligence.exceptions import (
 )
 from app.services.threat_intelligence.registry import ProviderRegistry
 from app.services.threat_intelligence.types import IndicatorType, ThreatIndicator
+from app.services.threat_intelligence.validation import should_skip_external_lookup
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +247,27 @@ class ThreatIntelligenceAgent:
             providers = self._registry.find_providers_for(
                 indicator.indicator_type
             )
+            allow_doc_ips = getattr(settings, "threat_intel_allow_documentation_ips", False)
+            skip, skip_reason = should_skip_external_lookup(
+                indicator.indicator_type, indicator.indicator, allow_documentation_ips=allow_doc_ips
+            )
+            if skip:
+                logger.info(
+                    "Skipping threat-intel lookups for non-public %s indicator %r: %s",
+                    indicator.indicator_type.value,
+                    indicator.indicator,
+                    skip_reason,
+                )
+                for provider in providers:
+                    results.append(
+                        ProviderAssociation(
+                            indicator=indicator,
+                            provider=provider.provider_name,
+                            result=None,
+                        )
+                    )
+                continue
+
             threat_indicator = ThreatIndicator(
                 indicator_type=indicator.indicator_type,
                 value=indicator.indicator,
@@ -311,6 +335,138 @@ class ThreatIntelligenceAgent:
                 logger.warning(
                     "Threat-intel analysis persistence failed for event=%s (%s)",
                     event.event_id,
+                    type(exc).__name__,
+                )
+                raise
+
+        return analysis
+
+    def analyze_indicator(
+        self,
+        indicator: ExtractedIndicator | ThreatIndicator,
+        *,
+        persistence: PersistenceCallback | None = None,
+    ) -> ThreatIntelligenceAnalysis:
+        """Run threat-intelligence provider lookups over a single manual indicator.
+
+        Does not require a security event.
+        """
+        if isinstance(indicator, ThreatIndicator):
+            extracted = ExtractedIndicator(
+                indicator=indicator.value,
+                indicator_type=indicator.indicator_type,
+                source_field="manual_lookup",
+                source_context="manual",
+            )
+        elif isinstance(indicator, ExtractedIndicator):
+            extracted = indicator
+        else:
+            raise TypeError(
+                "Expected ThreatIndicator or ExtractedIndicator, got "
+                f"{type(indicator).__name__}"
+            )
+
+        lookup_indicators = [extracted]
+
+        results: list[ProviderAssociation] = []
+        failures: list[ProviderFailure] = []
+        enrichments = []
+
+        attempted_providers: set[str] = set()
+        succeeded_providers: set[str] = set()
+        failed_providers: set[str] = set()
+
+        lookups_attempted = 0
+        lookups_succeeded = 0
+        lookups_failed = 0
+
+        for ind in lookup_indicators:
+            providers = self._registry.find_providers_for(
+                ind.indicator_type
+            )
+            allow_doc_ips = getattr(settings, "threat_intel_allow_documentation_ips", False)
+            skip, skip_reason = should_skip_external_lookup(
+                ind.indicator_type, ind.indicator, allow_documentation_ips=allow_doc_ips
+            )
+            if skip:
+                logger.info(
+                    "Skipping threat-intel lookups for non-public %s indicator %r: %s",
+                    ind.indicator_type.value,
+                    ind.indicator,
+                    skip_reason,
+                )
+                for provider in providers:
+                    results.append(
+                        ProviderAssociation(
+                            indicator=ind,
+                            provider=provider.provider_name,
+                            result=None,
+                        )
+                    )
+                continue
+
+            threat_indicator = ThreatIndicator(
+                indicator_type=ind.indicator_type,
+                value=ind.indicator,
+            )
+            for provider in providers:
+                name = provider.provider_name
+                attempted_providers.add(name)
+                lookups_attempted += 1
+                try:
+                    result = provider.lookup(threat_indicator)
+                except Exception as exc:
+                    lookups_failed += 1
+                    failed_providers.add(name)
+                    failures.append(self._to_failure(ind, name, exc))
+                    logger.warning(
+                        "Threat-intel lookup failed: provider=%s "
+                        "indicator_type=%s indicator=%r error_type=%s",
+                        name,
+                        ind.indicator_type.value,
+                        ind.indicator,
+                        self._classify(exc)[0],
+                    )
+                    continue
+                lookups_succeeded += 1
+                succeeded_providers.add(name)
+                results.append(
+                    ProviderAssociation(
+                        indicator=ind,
+                        provider=name,
+                        result=result,
+                    )
+                )
+                enrichments.append(
+                    threat_intel_result_to_enrichment(result)
+                )
+
+        metadata = ThreatIntelMetadata(
+            providers_attempted=len(attempted_providers),
+            providers_succeeded=len(succeeded_providers),
+            providers_failed=len(failed_providers),
+            indicators_extracted=len(lookup_indicators),
+            lookups_attempted=lookups_attempted,
+            lookups_succeeded=lookups_succeeded,
+            lookups_failed=lookups_failed,
+        )
+
+        analysis = ThreatIntelligenceAnalysis(
+            event_id=None,
+            indicators=[extracted],
+            results=results,
+            failures=failures,
+            enrichments=enrichments,
+            metadata=metadata,
+        )
+
+        if persistence is not None:
+            try:
+                persistence(analysis)
+            except Exception as exc:
+                logger.warning(
+                    "Threat-intel manual analysis persistence failed for indicator=%r (%s)",
+                    extracted.indicator,
                     type(exc).__name__,
                 )
                 raise

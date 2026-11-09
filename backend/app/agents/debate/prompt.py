@@ -150,13 +150,22 @@ _ROUND_TASK: dict[RoundKind, str] = {
         "Round 1 — independent assessment.  Review the shared evidence and "
         "produce your own observations and hypotheses WITHOUT reference to any "
         "other agent.  This is your independent view; later you will see the "
-        "others and may disagree with them."
+        "others and may disagree with them.\n\n"
+        "ANALYST PRECISION REQUIREMENTS FOR HYPOTHESES:\n"
+        "- A hypothesis must be concrete, technical, and directly actionable for a SOC security analyst.\n"
+        "- Ground your hypothesis in the specific entities present in the evidence catalog: name the affected assets, accounts, IP addresses, files, or detection rules.\n"
+        "- Specify the exact attack tactic or technique (e.g. Credential Dumping, Lateral Movement, T1059 Command Execution, Privilege Escalation) and the adversary objective.\n"
+        "- State the kill-chain phase and impact.\n"
+        "- AVOID vague generalities such as 'anomalous activity occurred' or 'suspicious behavior observed'. State precisely what threat pattern or operational activity the telemetry indicates."
     ),
     RoundKind.ROUND_TWO: (
         "Round 2 — cross-agent arguments.  You are shown the hypotheses other "
         "agents raised.  Argue for or against them using only the evidence.  "
         "Target a hypothesis by its exact hypothesis_id.  Where you disagree, "
-        "say why and cite the evidence that supports your disagreement."
+        "say why and cite the evidence that supports your disagreement.\n\n"
+        "ANALYST GUIDANCE:\n"
+        "- Evaluate whether alternative benign explanations (e.g. scheduled maintenance, admin scripting, vulnerability scanners) account for the telemetry.\n"
+        "- Pinpoint which specific evidence references validate or contradict the hypothesis."
     ),
     RoundKind.ROUND_THREE: (
         "Round 3 — counterarguments.  You are shown the arguments raised in "
@@ -166,7 +175,9 @@ _ROUND_TASK: dict[RoundKind, str] = {
         "unsupported assumption.  Target an argument by its exact "
         "argument_id.  Every counterargument you raise must cite at least one "
         "real reference.  You may NOT invent negative evidence: if the "
-        "arguments survive scrutiny, say so."
+        "arguments survive scrutiny, say so.\n\n"
+        "ANALYST GUIDANCE:\n"
+        "- Scrutinize whether benign tooling, missing network egress, or false-positive prone detection logic weakens the conclusion."
     ),
     RoundKind.ROUND_FOUR: (
         "Round 4 — reconciliation.  Handled by the engine; no model call."

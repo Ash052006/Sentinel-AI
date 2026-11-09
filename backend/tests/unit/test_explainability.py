@@ -585,3 +585,18 @@ def test_post_handler_honours_use_ai_flag(monkeypatch):
         _CORRELATION_ID, payload=None, db=None, current_user=None
     )
     assert stub.calls[-1] == (_CORRELATION_ID, True)
+
+
+def test_mitre_dimension_grounded_from_catalog():
+    rule_id = "11111111-1111-4111-8111-111111111111"
+    det = _detection_record(rule_id=rule_id)
+    service = ExplainabilityService(_sources(detections=[det]))
+    result = service.explain_correlation(None, _CORRELATION_ID, use_ai=False)
+    by_dim = {d.dimension: d for d in result.dimensions}
+
+    mitre = by_dim[ExplanationDimension.MITRE]
+    assert mitre.coverage is DimensionCoverage.GROUNDED
+    assert any("T1059.001" in claim.text for claim in mitre.claims)
+    assert any("PowerShell" in claim.text for claim in mitre.claims)
+    assert _DETECTION_1 in mitre.reference_ids
+

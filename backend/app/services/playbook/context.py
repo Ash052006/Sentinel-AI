@@ -5,7 +5,7 @@ handed to it as a single immutable :class:`PlaybookInputs` value.  That split is
 deliberate: the engine performs no I/O, so a generation run is a pure function
 of its inputs and is reproducible by re-running it.
 
-Three rules govern what becomes an input.
+Four rules govern what becomes an input.
 
 **Only persisted V2 entities count as evidence.**  Nothing is invented, nothing is
 carried over from a prior playbook, and no narrative text from a source record is
@@ -20,6 +20,11 @@ excluded from the evidence scope and reported as unavailable inputs instead.
 **Untrusted text is detected but never propagated.**  Node labels are scanned for
 instruction-like content.  A match sets a flag and a limitation; it does not copy
 the text anywhere, so a log line cannot become a rationale.
+
+**A debate or prediction is consumed only from the current graph snapshot.**  Its
+persisted digest must match the graph being read now, and a prediction that named
+a debate must name the same debate being consumed.  An older artifact is reported
+as unavailable rather than paired with a fresh graph or a different debate.
 """
 
 from __future__ import annotations
@@ -264,12 +269,18 @@ class PlaybookContextAssembler:
 
         self._enforce_target_bound(targets)
 
-        debate = self._assemble_debate(correlation, graph, unavailable)
-        prediction = self._assemble_prediction(correlation, unavailable)
+        graph_digest = graph_snapshot_digest(graph)
+        debate = self._assemble_debate(correlation, graph_digest, unavailable)
+        prediction = self._assemble_prediction(
+            correlation,
+            graph_digest=graph_digest,
+            debate=debate,
+            unavailable=unavailable,
+        )
 
         return PlaybookInputs(
             correlation_id=correlation,
-            graph_snapshot_digest=graph_snapshot_digest(graph),
+            graph_snapshot_digest=graph_digest,
             graph_node_count=graph.node_count,
             graph_edge_count=graph.edge_count,
             graph_truncated=bool(graph.truncated),
@@ -346,7 +357,7 @@ class PlaybookContextAssembler:
     def _assemble_debate(
         self,
         correlation: uuid.UUID,
-        graph: BoundedGraph,
+        graph_digest: str,
         unavailable: dict[str, str],
     ) -> DebateOverview | None:
         """Reduce the latest debate to what V3.25 may consume.
@@ -364,8 +375,7 @@ class PlaybookContextAssembler:
             return None
 
         session = sessions[0]
-        digest = graph_snapshot_digest(graph)
-        if session.metadata.graph_snapshot_digest != digest:
+        if session.metadata.graph_snapshot_digest != graph_digest:
             unavailable.setdefault(
                 "debate",
                 "the persisted debate was produced from a different graph snapshot",
@@ -406,6 +416,9 @@ class PlaybookContextAssembler:
     def _assemble_prediction(
         self,
         correlation: uuid.UUID,
+        *,
+        graph_digest: str,
+        debate: DebateOverview | None,
         unavailable: dict[str, str],
     ) -> PredictionOverview | None:
         """Reduce the latest prediction session to what V3.25 may consume.
@@ -414,6 +427,13 @@ class PlaybookContextAssembler:
         action that gathers evidence or positions a control, and they can cap the
         confidence of anything resting on them; they can never, alone, justify a
         disruptive action — an invariant the action contract enforces.
+
+        The session must belong to the same graph snapshot the playbook is
+        reasoning over.  A prediction from an older graph is not a close enough
+        input to reuse: its targets and references may no longer resolve, and
+        silently consuming it would pair a fresh proposal with stale reasoning.
+        If it names a debate, that debate must be the one being consumed too, or
+        the two upstream conclusions describe different analytical states.
         """
         sessions = self._predictions.get_by_correlation(correlation, limit=1)
         if not sessions:
@@ -424,6 +444,23 @@ class PlaybookContextAssembler:
             return None
 
         session = sessions[0]
+        if session.metadata.graph_snapshot_digest != graph_digest:
+            unavailable.setdefault(
+                "prediction",
+                "the persisted prediction session was produced from a different "
+                "graph snapshot",
+            )
+            return None
+        prediction_debate_id = session.metadata.debate_id
+        if prediction_debate_id is not None:
+            if debate is None or prediction_debate_id != str(debate.debate_id):
+                unavailable.setdefault(
+                    "prediction",
+                    "the persisted prediction session consumed a different "
+                    "debate than the one available for this graph snapshot",
+                )
+                return None
+
         limit = self._bounds.max_predictions
         summaries = [
             PredictionSummary(
@@ -431,7 +468,7 @@ class PlaybookContextAssembler:
                 prediction_id=item.prediction_id,
                 prediction_kind=item.prediction_kind.value,
                 depth=item.depth.value,
-                status=item.prediction_status.value,
+                status=(getattr(item, "status", None) or getattr(item, "prediction_status", None)).value,
                 target=item.target,
                 target_basis=item.target_basis.value,
                 confidence=item.uncertainty.confidence,
@@ -458,16 +495,37 @@ class PlaybookContextAssembler:
                 "the persisted prediction session contains no predictions",
             )
             return None
+        unresolved: list[str] = []
+        session_uncertainty = getattr(session, "uncertainty", None)
+        if session_uncertainty and hasattr(session_uncertainty, "unresolved_questions"):
+            for q in session_uncertainty.unresolved_questions:
+                if q not in unresolved:
+                    unresolved.append(q[:256])
+        for p in session.predictions:
+            p_uncertainty = getattr(p, "uncertainty", None)
+            if p_uncertainty and hasattr(p_uncertainty, "unresolved_questions"):
+                for q in p_uncertainty.unresolved_questions:
+                    if q not in unresolved:
+                        unresolved.append(q[:256])
+
+        gaps: list[str] = []
+        if session_uncertainty and hasattr(session_uncertainty, "evidence_gaps"):
+            for g in session_uncertainty.evidence_gaps:
+                if g not in gaps:
+                    gaps.append(g[:256])
+        for p in session.predictions:
+            p_uncertainty = getattr(p, "uncertainty", None)
+            if p_uncertainty and hasattr(p_uncertainty, "evidence_gaps"):
+                for g in p_uncertainty.evidence_gaps:
+                    if g not in gaps:
+                        gaps.append(g[:256])
+
         return PredictionOverview(
             prediction_session_id=session.prediction_session_id,
             status=session.status.value,
             predictions=summaries,
-            unresolved_questions=[
-                question[:256] for question in session.uncertainty.unresolved_questions
-            ][:32],
-            evidence_gaps=[gap[:256] for gap in session.uncertainty.evidence_gaps][
-                :32
-            ],
+            unresolved_questions=unresolved[:32],
+            evidence_gaps=gaps[:32],
         )
 
 

@@ -765,9 +765,9 @@ class TestDetail:
         row = make_indicator(ti_db)
         first_event = uuid.uuid4()
         second_event = uuid.uuid4()
-        make_lookup(ti_db, row, event_id=first_event)
-        make_lookup(ti_db, row, event_id=second_event)
-        make_lookup(ti_db, row, event_id=first_event)
+        make_lookup(ti_db, row, event_id=first_event, provider="VirusTotal")
+        make_lookup(ti_db, row, event_id=second_event, provider="VirusTotal")
+        make_lookup(ti_db, row, event_id=first_event, provider="abuseipdb")
         ti_db.commit()
 
         detail = service.get_indicator(row.id)
@@ -779,8 +779,8 @@ class TestDetail:
     ) -> None:
         row = make_indicator(ti_db)
         event_id = uuid.uuid4()
-        make_lookup(ti_db, row, event_id=event_id)
-        make_lookup(ti_db, row, event_id=event_id)
+        make_lookup(ti_db, row, event_id=event_id, provider="VirusTotal")
+        make_lookup(ti_db, row, event_id=event_id, provider="abuseipdb")
         ti_db.commit()
 
         result = service.list_indicator_events(row.id)

@@ -204,13 +204,17 @@ def test_indicator_required_fields_non_nullable():
 
 
 def test_lookup_required_fields_non_nullable():
-    """Lookup execution fields are required; result/failure are optional."""
-    required = {"event_id", "indicator_id", "provider", "status", "performed_at"}
+    """Lookup execution fields are required; result/failure are optional.
+
+    Note: event_id is nullable to support manual lookups without fabricated event IDs,
+    accompanied by origin='manual'.
+    """
+    required = {"indicator_id", "provider", "status", "performed_at", "provenance", "origin"}
     optional = {
+        "event_id",
         "retryable", "error_type", "error_message",
         "found", "confidence", "result_timestamp", "evidence", "result_metadata",
     }
-    required.add("provenance")  # required, defaults to ENRICHED
     for column_name in required:
         column = ThreatIntelLookup.__table__.columns[column_name]
         assert not column.nullable, f"{column_name} should be required"
@@ -398,8 +402,9 @@ def test_provenance_check_constraints_to_enriched():
         for c in ThreatIntelLookup.__table__.constraints
         if isinstance(c, CheckConstraint)
     ]
-    assert len(checks) == 1
-    _name, sqltext = checks[0]
+    provenance_checks = [c for c in checks if "enriched" in c[1].lower()]
+    assert len(provenance_checks) == 1
+    _name, sqltext = provenance_checks[0]
     assert "enriched" in sqltext.lower()
 
 

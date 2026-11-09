@@ -48,6 +48,18 @@ _FIXED_TS = datetime(2025, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
 _EVENT_1 = uuid.UUID("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a51")
 
 
+def _noop_graph_materializer(_db, _correlation_id) -> None:
+    """Inert post-commit graph hook for these persistence-scoped tests."""
+    return None
+
+
+def _service() -> CorrelationPersistenceService:
+    """A persistence service whose graph hook is inert."""
+    return CorrelationPersistenceService(
+        graph_materializer=_noop_graph_materializer
+    )
+
+
 def _input(*, event_id: uuid.UUID = _EVENT_1, hours: int = 0) -> DetectionCorrelationInput:
     return DetectionCorrelationInput(
         detection_id=uuid.uuid4(),
@@ -119,7 +131,7 @@ def test_agent_without_sink_persists_nothing(db_session):
 def test_agent_empty_batch_with_sink_does_not_invoke_persistence(db_session):
     """An empty batch produces no results and the sink is not invoked."""
     agent = CorrelationAgent()
-    sink = persist_correlations_bound(db_session)
+    sink = persist_correlations_bound(db_session, service=_service())
     results = agent.analyze(_batch(), clock=_FIXED_TS, persistence=sink)
 
     assert results == []
@@ -134,7 +146,7 @@ def test_agent_empty_batch_with_sink_does_not_invoke_persistence(db_session):
 def test_agent_with_sink_persists_results_and_members(db_session):
     """The bound sink persists the agent's complete result set."""
     agent = CorrelationAgent()
-    sink = persist_correlations_bound(db_session)
+    sink = persist_correlations_bound(db_session, service=_service())
     results = agent.analyze(_batch(_input(), _input()), clock=_FIXED_TS, persistence=sink)
 
     assert len(results) == 1
@@ -150,7 +162,10 @@ def test_agent_with_sink_persists_results_and_members(db_session):
 
 def test_agent_with_custom_service_summary_returned(db_session):
     """The agent returns results while the sink returns the service summary."""
-    service = CorrelationPersistenceService(clock=lambda: _FIXED_TS)
+    service = CorrelationPersistenceService(
+        clock=lambda: _FIXED_TS,
+        graph_materializer=_noop_graph_materializer,
+    )
     sink = persist_correlations_bound(db_session, service=service)
     agent = CorrelationAgent()
 
@@ -175,7 +190,7 @@ def test_agent_persistence_failure_propagates(db_session):
     db_session.commit()
 
     agent = CorrelationAgent()
-    sink = persist_correlations_bound(db_session)
+    sink = persist_correlations_bound(db_session, service=_service())
     with pytest.raises(Exception) as exc_info:
         agent.analyze(_batch(_input()), clock=_FIXED_TS, persistence=sink)
 
@@ -184,7 +199,7 @@ def test_agent_persistence_failure_propagates(db_session):
 
 def test_persist_correlations_bound_returns_callable(db_session):
     """The bound helper returns a callable accepting CorrelationResults."""
-    sink = persist_correlations_bound(db_session)
+    sink = persist_correlations_bound(db_session, service=_service())
     assert callable(sink)
     correlation_id = uuid.uuid4()
     from app.schemas.correlation import CorrelationMember as MemberSchema

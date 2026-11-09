@@ -34,11 +34,14 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.services.knowledge_graph.materialization import GraphMaterializer
 
 from app.models.soar_execution import SoarExecutionRow
 from app.models.soar_playbook import SoarPlaybookRow
@@ -183,11 +186,31 @@ class SoarService:
     def __init__(
         self,
         repository_factory: Callable[[Session], SoarRepository] = SoarRepository,
+        graph_materializer: "GraphMaterializer | None" = None,
     ) -> None:
         self._repository_factory = repository_factory
+        self._graph_materializer = graph_materializer
 
     def _repo(self, db: Session) -> SoarRepository:
         return self._repository_factory(db)
+
+    def _refresh_correlation_graph(
+        self, db: Session, correlation_id: uuid.UUID | None
+    ) -> None:
+        """Best-effort refresh of the execution's correlation subgraph.
+
+        Called only after the execution row is durable.  Isolated by the shared
+        materializer, which logs and swallows any graph failure.
+        """
+        if correlation_id is None:
+            return
+        from app.services.knowledge_graph.materialization import (
+            refresh_correlation_graphs,
+        )
+
+        refresh_correlation_graphs(
+            db, [correlation_id], materializer=self._graph_materializer
+        )
 
     def _engine(
         self,
@@ -561,6 +584,7 @@ class SoarService:
             ),
             ip_address=ip_address,
         )
+        self._refresh_correlation_graph(db, row.correlation_id)
         steps = self._steps_for(db, row.id, origin="execute persist")
         return _execution_record(row, steps=steps)
 
@@ -659,6 +683,7 @@ class SoarService:
             details=f"cancelled execution for playbook {row.playbook_id}",
             ip_address=ip_address,
         )
+        self._refresh_correlation_graph(db, row.correlation_id)
         steps = self._steps_for(db, row.id, origin="cancel read")
         return _execution_record(row, steps=steps)
 

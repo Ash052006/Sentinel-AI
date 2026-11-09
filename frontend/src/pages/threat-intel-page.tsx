@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookKey, ExternalLink } from 'lucide-react'
 
 import { threatIntelligenceApi } from '../api/threat-intelligence'
@@ -22,6 +22,7 @@ import { formatDateTime, shortId } from '../lib/formats'
 import type {
   IndicatorLookupStatus,
   IndicatorType,
+  ManualLookupResponse,
   ThreatIntelIndicatorRecord,
   ThreatIntelLookupRecord,
 } from '../types/api'
@@ -51,6 +52,20 @@ import type {
 
 const PAGE_SIZE = 50
 const INDICATOR_TYPES: IndicatorType[] = ['ip', 'domain', 'url', 'hash']
+
+function detectIndicatorType(value: string): IndicatorType {
+  const trimmed = value.trim()
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(trimmed) || trimmed.includes(':')) {
+    return 'ip'
+  }
+  if (/^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/.test(trimmed)) {
+    return 'hash'
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return 'url'
+  }
+  return 'domain'
+}
 
 /** Lookup statuses that represent a provider problem rather than a result. */
 const FAILURE_LABELS = new Set([
@@ -296,11 +311,18 @@ function IndicatorDetail({ indicatorId }: { indicatorId: string }) {
 }
 
 export function ThreatIntelPage() {
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [typeFilter, setTypeFilter] = useState<string>('')
-  const [search, setSearch] = useState('')
+  const [inputValue, setInputValue] = useState('')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+
+  // Manual lookup state
+  const [manualType, setManualType] = useState<IndicatorType>('ip')
+  const [manualLoading, setManualLoading] = useState(false)
+  const [manualError, setManualError] = useState<string | null>(null)
+  const [manualResult, setManualResult] = useState<ManualLookupResponse | null>(null)
 
   const indicators = useQuery({
     queryKey: ['threat-intelligence', 'indicators', page, typeFilter, query],
@@ -335,10 +357,36 @@ export function ThreatIntelPage() {
 
   const accessDenied = isAccessError(indicators.error)
 
-  function applySearch(event: React.FormEvent) {
+  async function handleManualLookup(event: React.FormEvent) {
     event.preventDefault()
-    setPage(1)
-    setQuery(search.trim())
+    const trimmed = inputValue.trim()
+    if (!trimmed) {
+      setManualError('Indicator value must not be empty or whitespace.')
+      return
+    }
+    const targetType = (typeFilter as IndicatorType) || manualType || detectIndicatorType(trimmed)
+    setManualLoading(true)
+    setManualError(null)
+    setManualResult(null)
+    try {
+      const result = await threatIntelligenceApi.manualLookup({
+        indicator: trimmed,
+        indicator_type: targetType,
+      })
+      setManualResult(result)
+      setSelected(result.indicator_id)
+      void queryClient.invalidateQueries({ queryKey: ['threat-intelligence', 'indicators'] })
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setManualError(err.detail)
+      } else if (err instanceof Error) {
+        setManualError(err.message)
+      } else {
+        setManualError('Manual lookup request failed.')
+      }
+    } finally {
+      setManualLoading(false)
+    }
   }
 
   return (
@@ -348,58 +396,292 @@ export function ThreatIntelPage() {
         description="Indicators extracted from normalized security events, with the provider lookups persisted against them."
       />
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-ink-dim">Type</span>
-          <Select
-            aria-label="Filter by indicator type"
-            value={typeFilter}
-            className="h-8 w-36 text-[11px] font-mono"
-            onChange={(event) => {
-              setPage(1)
-              setTypeFilter(event.target.value)
-            }}
-          >
-            <option value="">All types</option>
-            {INDICATOR_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {indicatorTypeLabel[type]}
-              </option>
-            ))}
-          </Select>
-        </label>
+      <Panel
+        title="Manual Lookup"
+        subtitle="Unified Investigation: Inspect existing database observations or trigger real-time provider lookups."
+        data-testid="manual-lookup-panel"
+      >
+        <form onSubmit={handleManualLookup} data-testid="manual-lookup-form" className="space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-ink-dim">Type</span>
+              <Select
+                aria-label="Filter by indicator type"
+                data-testid="manual-lookup-type"
+                value={manualType}
+                className="h-8 w-36 text-[11px] font-mono"
+                onChange={(event) => {
+                  const val = event.target.value as IndicatorType
+                  setManualType(val)
+                  setTypeFilter(val)
+                  setPage(1)
+                }}
+                disabled={manualLoading}
+              >
+                {INDICATOR_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {indicatorTypeLabel[type]}
+                  </option>
+                ))}
+              </Select>
+            </label>
 
-        <form onSubmit={applySearch} className="flex items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-ink-dim">Search</span>
-            <Input
-              aria-label="Search indicators"
-              value={search}
-              placeholder="indicator value or canonical key"
-              className="h-8 w-72 text-[11px] font-mono"
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          <Button type="submit" size="sm" variant="outline">
-            Search
-          </Button>
-          {(query || typeFilter) && (
+            <label className="flex flex-1 min-w-[200px] flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-ink-dim">Indicator</span>
+              <Input
+                aria-label="Search indicators"
+                data-testid="manual-lookup-input"
+                value={inputValue}
+                placeholder="Search database or lookup indicator (e.g. 10.20.30.40, 8.8.8.8)..."
+                className="h-8 text-[11px] font-mono"
+                onChange={(event) => setInputValue(event.target.value)}
+                disabled={manualLoading}
+              />
+            </label>
+
+            <Button
+              type="submit"
+              size="sm"
+              variant="default"
+              disabled={manualLoading}
+              data-testid="manual-lookup-button"
+            >
+              {manualLoading ? 'Looking up...' : 'Lookup Indicator'}
+            </Button>
+
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSearch('')
-                setQuery('')
-                setTypeFilter('')
+              variant="outline"
+              disabled={manualLoading}
+              onClick={(e) => {
+                e.preventDefault()
                 setPage(1)
+                setQuery(inputValue.trim())
               }}
             >
-              Clear
+              Search
             </Button>
+
+            {(inputValue || query || typeFilter || manualResult) && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={manualLoading}
+                onClick={() => {
+                  setInputValue('')
+                  setQuery('')
+                  setTypeFilter('')
+                  setManualType('ip')
+                  setManualResult(null)
+                  setManualError(null)
+                  setSelected(null)
+                  setPage(1)
+                }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          {manualLoading && (
+            <div data-testid="manual-lookup-loading" className="pt-2">
+              <LoadingRows rows={2} />
+            </div>
+          )}
+
+          {manualError && (
+            <div
+              data-testid="manual-lookup-error"
+              className="rounded border border-critical/40 bg-critical/10 p-3 text-xs text-critical"
+            >
+              {manualError}
+            </div>
+          )}
+
+          {manualResult && (
+            <div
+              data-testid="manual-lookup-results"
+              className="space-y-3 rounded border border-edge bg-surface-2/40 p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge-soft pb-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    data-testid="manual-result-value"
+                    className="font-mono text-sm font-semibold text-ink"
+                  >
+                    {manualResult.normalized_indicator_value}
+                  </span>
+                  <Badge tone={indicatorTypeTone[manualResult.indicator_type]}>
+                    {indicatorTypeLabel[manualResult.indicator_type]}
+                  </Badge>
+                  <Badge
+                    tone={
+                      indicatorLookupStatusMeta[
+                        manualResult.status as IndicatorLookupStatus
+                      ]?.tone ?? 'neutral'
+                    }
+                    data-testid="manual-result-status"
+                  >
+                    {indicatorLookupStatusMeta[
+                      manualResult.status as IndicatorLookupStatus
+                    ]?.label ?? manualResult.status}
+                  </Badge>
+                  <Badge
+                    tone={manualResult.is_new_indicator ? 'accent' : 'muted'}
+                    data-testid="manual-result-identity"
+                  >
+                    {manualResult.is_new_indicator ? 'New Indicator' : 'Existing Indicator'}
+                  </Badge>
+                </div>
+                <div
+                  className="font-mono text-[11px] text-ink-dim"
+                  data-testid="manual-result-canonical-key"
+                >
+                  {manualResult.canonical_key}
+                </div>
+              </div>
+
+              {/* Encounter Context Banner */}
+              <div
+                data-testid="manual-result-encounter-context"
+                className="rounded border border-edge bg-surface-1/80 p-3 text-xs"
+              >
+                {manualResult.is_new_indicator ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="accent">Not In Database</Badge>
+                      <span className="font-semibold text-ink">Never encountered in security events</span>
+                    </div>
+                    <p className="text-[11px] text-ink-dim">
+                      This indicator was not previously observed in any ingested events. Real-time provider lookups were executed and persisted as a manual observation.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="muted">Tracked in Database</Badge>
+                      <span className="font-semibold text-ink">Previously encountered in SentinelAI</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-dim">
+                      {manualResult.first_seen && (
+                        <span>
+                          First seen:{' '}
+                          <span className="font-mono text-ink">
+                            {formatDateTime(manualResult.first_seen)}
+                          </span>
+                        </span>
+                      )}
+                      {manualResult.last_seen && (
+                        <span>
+                          Last seen:{' '}
+                          <span className="font-mono text-ink">
+                            {formatDateTime(manualResult.last_seen)}
+                          </span>
+                        </span>
+                      )}
+                      <span className="text-ink-faint">
+                        Historical timeline and correlated security events are loaded in the detail panel below.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <Stat label="Attempted" value={manualResult.providers_attempted} />
+                <Stat label="Succeeded" value={manualResult.providers_succeeded} tone="text-low" />
+                <Stat
+                  label="Failed"
+                  value={manualResult.providers_failed}
+                  tone={manualResult.providers_failed > 0 ? 'text-critical' : undefined}
+                />
+                <Stat label="Skipped" value={manualResult.providers_skipped} />
+              </div>
+
+              {manualResult.results.length === 0 ? (
+                <div data-testid="manual-no-providers" className="text-xs text-ink-faint">
+                  No providers configured or applicable for this indicator type.
+                </div>
+              ) : (
+                <div className="space-y-2 pt-2">
+                  <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+                    Provider Results
+                  </div>
+                  <div className="space-y-2">
+                    {manualResult.results.map((res) => {
+                      const tone =
+                        res.status === 'success'
+                          ? 'low'
+                          : res.status === 'skipped'
+                            ? 'muted'
+                            : 'critical'
+                      return (
+                        <div
+                          key={res.provider}
+                          data-testid="manual-provider-result"
+                          className="rounded border border-edge bg-surface-1 p-3 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2 pb-1">
+                            <span className="font-semibold text-ink">{res.provider}</span>
+                            <Badge tone={tone} data-testid="manual-provider-status">
+                              {res.status.toUpperCase()}
+                            </Badge>
+                          </div>
+
+                          {res.status === 'success' && (
+                            <div className="space-y-1 text-ink-dim">
+                              <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                                {res.found !== null && res.found !== undefined && (
+                                  <span data-testid="manual-provider-found">
+                                    {res.found ? 'Record found' : 'No record found'}
+                                  </span>
+                                )}
+                                {res.confidence !== null && res.confidence !== undefined && (
+                                  <span data-testid="manual-provider-confidence">
+                                    Confidence: {(res.confidence * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                                <span className="text-ink-faint">
+                                  {formatDateTime(res.performed_at)}
+                                </span>
+                              </div>
+                              {res.evidence && Object.keys(res.evidence).length > 0 && (
+                                <div className="mt-2" data-testid="manual-provider-evidence">
+                                  <DataTree value={res.evidence} />
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {res.status === 'skipped' && (
+                            <div
+                              data-testid="manual-provider-skip-reason"
+                              className="text-[11px] text-ink-dim"
+                            >
+                              {res.error_message ?? 'Lookup skipped for this indicator.'}
+                            </div>
+                          )}
+
+                          {res.status === 'error' && (
+                            <div
+                              data-testid="manual-provider-error-message"
+                              className="text-[11px] text-critical"
+                            >
+                              {res.error_message ?? 'Provider request failed.'}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </form>
-      </div>
+      </Panel>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Indicators" value={total} />

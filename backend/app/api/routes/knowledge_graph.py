@@ -14,10 +14,11 @@ Architecture::
 
 Design principles:
 
-* **Read-only** — only ``GET`` endpoints exist.  Graph state is written solely
-  by the deterministic builder (``app.cli build-knowledge-graph``); no graph
-  route ever builds, mutates, or repairs the graph.  A read must never cause a
-  write.
+* **Read-only** — only ``GET`` endpoints exist.  Graph state is written by the
+  deterministic builder, which service hooks invoke after successful source
+  commits; the CLI (``app.cli build-knowledge-graph``) remains available for
+  initial builds and reconciliation.  No graph route ever builds, mutates, or
+  repairs the graph.  A read must never cause a write.
 * **Thin transport** — each route validates input, calls one query method, and
   returns a schema.  No route constructs SQL or filters in Python.
 * **Bounded** — every traversal is capped on nodes, edges, and depth, and
@@ -248,14 +249,37 @@ def _correlation_graph_response(
 
     A missing correlation node is reported as 404, which covers both "no such
     correlation" and "correlation is not in the graph" without disclosing which.
+    Self-heals on-demand if the correlation exists in V2 correlation results
+    but has not yet been materialized.
     """
     try:
         graph = _queries().get_correlation_graph(db, correlation_id, max_depth=max_depth)
     except GraphNodeNotFound as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        ) from exc
+        # Check if the correlation exists in persistent storage and can be materialized
+        try:
+            corr_uuid = correlation_id if isinstance(correlation_id, uuid.UUID) else uuid.UUID(str(correlation_id))
+            from app.models.correlation_result import CorrelationResult
+            from app.services.knowledge_graph.materialization import materialize_correlation_graph
+            from sqlalchemy import select
+
+            exists = db.scalar(
+                select(CorrelationResult.correlation_id).where(CorrelationResult.correlation_id == corr_uuid)
+            )
+            if exists is not None:
+                materialize_correlation_graph(db, corr_uuid)
+                graph = _queries().get_correlation_graph(db, correlation_id, max_depth=max_depth)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=str(exc),
+                ) from exc
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
 
     return GraphTraversalResponse(
         root_node_id=str(graph.root_node_id) if graph.root_node_id else None,

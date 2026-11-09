@@ -227,9 +227,22 @@ class SigmaDetectionEngine:
         matched_fields = evidence_data.get("matched_fields", {})
         matched_conditions = evidence_data.get("matched_conditions", [])
 
+        from app.services.mitre.mapping import get_mitre_techniques_for_rule
+        rule_refs: dict[str, Any] = {}
+        techs = get_mitre_techniques_for_rule(
+            str(rule.rule_id),
+            tags=getattr(rule, "tags", ()),
+            rule_title=getattr(rule, "name", None),
+        )
+        if techs:
+            rule_refs["attack"] = techs[0].technique_id
+            rule_refs["attack_name"] = techs[0].name
+            rule_refs["attack_tactic"] = techs[0].tactic
+
         evidence = DetectionEvidence(
             matched_conditions=matched_conditions,
             matched_fields=dict(matched_fields),
+            rule_references=rule_refs,
             detection_context={
                 "engine": "sigma",
                 "engine_version": self._engine_version,

@@ -1,6 +1,11 @@
 import type {
+  ActionCategory,
+  ActionConfidenceBand,
+  ActionPriority,
+  ApprovalRequirement,
   ApprovalStatus,
   AttackPathNodeType,
+  CapabilityStatus,
   ConfidenceBand,
   CorrelationStatus,
   DebateAgentRole,
@@ -11,6 +16,7 @@ import type {
   DetectionSeverity,
   EvidenceStance,
   EvidenceSupport,
+  GroundingBasis,
   IndicatorLookupStatus,
   IndicatorType,
   KnowledgeNodeType,
@@ -18,6 +24,11 @@ import type {
   LimitationKind,
   LookupStatusLabel,
   MemoryType,
+  PlaybookEvidenceSource,
+  PlaybookLimitationKind,
+  PlaybookLifecycle,
+  PlaybookStatus,
+  PlaybookTargetType,
   PolicyDecisionStatus,
   PredictionBasis,
   PredictionDepth,
@@ -412,4 +423,153 @@ export const PREDICTION_STANCE_TONES: Record<EvidenceStance, Tone> = {
 export const PREDICTION_STANCE_LABELS: Record<EvidenceStance, string> = {
   supporting: 'supporting',
   contradicting: 'contradicting',
+}
+
+// ---------------------------------------------------------------------------
+// V3.25 — AI Playbook Generation vocabulary
+//
+// The backend vocabulary is a closed set (app/services/playbook/vocabulary.py),
+// so these maps are exhaustive: a new server-side value is a type error here
+// rather than a blank badge at runtime.
+// ---------------------------------------------------------------------------
+
+/**
+ * Tone reflects the *stage* of the proposal, not how dangerous it is.
+ * `insufficient_evidence` is deliberately muted — the engine correctly declined
+ * to propose anything, which is an honest answer rather than a weak one.
+ */
+export const PLAYBOOK_STATUS_META: Record<
+  PlaybookStatus,
+  { label: string; tone: Tone }
+> = {
+  proposed: { label: 'proposed', tone: 'accent' },
+  insufficient_evidence: { label: 'insufficient evidence', tone: 'muted' },
+  contested: { label: 'contested', tone: 'high' },
+}
+
+export const PLAYBOOK_LIFECYCLE_LABELS: Record<PlaybookLifecycle, string> = {
+  draft: 'draft',
+  proposed: 'proposed',
+  approval_required: 'approval required',
+  approved: 'approved',
+  rejected: 'rejected',
+  executing: 'executing',
+  executed: 'executed',
+  verification_required: 'verification required',
+  verified: 'verified',
+  failed: 'failed',
+  cancelled: 'cancelled',
+}
+
+export const ACTION_PRIORITY_META: Record<
+  ActionPriority,
+  { label: string; tone: Tone }
+> = {
+  immediate: { label: 'immediate', tone: 'critical' },
+  high: { label: 'high', tone: 'high' },
+  medium: { label: 'medium', tone: 'medium' },
+  low: { label: 'low', tone: 'low' },
+}
+
+export const ACTION_CATEGORY_LABELS: Record<ActionCategory, string> = {
+  investigation: 'Investigation',
+  containment: 'Containment',
+  prevention: 'Prevention',
+  eradication: 'Eradication',
+  recovery: 'Recovery',
+  verification: 'Verification',
+}
+
+export const APPROVAL_REQUIREMENT_META: Record<
+  ApprovalRequirement,
+  { label: string; tone: Tone }
+> = {
+  no_approval: { label: 'no approval', tone: 'low' },
+  approval_required: { label: 'approval required', tone: 'medium' },
+  not_executable: { label: 'not executable', tone: 'muted' },
+}
+
+/**
+ * `unavailable` is muted, not alarming: the frozen capability table reports an
+ * action SentinelAI cannot perform today as NOT_EXECUTABLE rather than
+ * pretending it exists, and that is an honest limitation, not a failure.
+ */
+export const CAPABILITY_STATUS_META: Record<
+  CapabilityStatus,
+  { label: string; tone: Tone }
+> = {
+  available: { label: 'available', tone: 'low' },
+  unavailable: { label: 'unavailable', tone: 'muted' },
+}
+
+export const GROUNDING_BASIS_LABELS: Record<GroundingBasis, string> = {
+  established_evidence: 'established evidence',
+  prediction_supported: 'prediction supported',
+  both: 'evidence and prediction',
+}
+
+export const PLAYBOOK_EVIDENCE_SOURCE_LABELS: Record<
+  PlaybookEvidenceSource,
+  string
+> = {
+  event: 'Event',
+  detection: 'Detection',
+  correlation: 'Correlation',
+  risk_assessment: 'Risk',
+  investigation: 'Investigation',
+  threat_intelligence: 'Threat Intel',
+  incident_memory: 'Memory',
+  attack_path: 'Attack Path',
+  debate_claim: 'Debate claim',
+  prediction: 'Prediction',
+}
+
+export const ACTION_CONFIDENCE_BAND_LABELS: Record<
+  ActionConfidenceBand,
+  string
+> = {
+  very_low: 'very low',
+  low: 'low',
+  moderate: 'moderate',
+  high: 'high',
+}
+
+export const PLAYBOOK_LIMITATION_LABELS: Record<
+  PlaybookLimitationKind,
+  string
+> = {
+  no_resolvable_target: 'No resolvable target',
+  no_established_evidence: 'No established evidence',
+  capability_unavailable: 'Capability unavailable',
+  capability_simulated_only: 'Capability simulated only',
+  debate_absent: 'Debate absent',
+  debate_partial_consensus: 'Debate partial consensus',
+  debate_contested: 'Debate contested',
+  debate_graph_snapshot_mismatch: 'Debate graph snapshot mismatch',
+  prediction_absent: 'Prediction absent',
+  prediction_insufficient: 'Prediction insufficient',
+  containment_limited_to_evidence: 'Containment limited to evidence',
+  horizon_capped: 'Horizon capped',
+  graph_truncated: 'Graph truncated',
+  input_source_unavailable: 'Input source unavailable',
+  no_attack_mapping: 'No ATT&CK mapping',
+  untrusted_content_quarantined: 'Untrusted content quarantined',
+  model_candidates_rejected: 'Model candidates rejected',
+  no_rollback_available: 'No rollback available',
+}
+
+export const PLAYBOOK_TARGET_TYPE_LABELS: Record<PlaybookTargetType, string> = {
+  ip: 'IP',
+  domain: 'Domain',
+  url: 'URL',
+  file: 'File',
+  process: 'Process',
+  endpoint: 'Endpoint',
+  user: 'User',
+  account: 'Account',
+  token: 'Token',
+  credential: 'Credential',
+  network: 'Network',
+  correlation: 'Correlation',
+  incident: 'Incident',
 }

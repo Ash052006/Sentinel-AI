@@ -75,10 +75,10 @@ def _count(db, model) -> int:
 
 class TestSeedSync:
     def test_seed_is_idempotent(self, db, service) -> None:
-        assert service.sync_seed_playbooks(db, clock=lambda: FIXED) == 7
+        assert service.sync_seed_playbooks(db, clock=lambda: FIXED) == 10
         assert service.sync_seed_playbooks(db, clock=lambda: FIXED) == 0
-        assert _count(db, SoarPlaybookRow) == 7
-        assert _count(db, SoarPlaybookVersionRow) == 7
+        assert _count(db, SoarPlaybookRow) == 10
+        assert _count(db, SoarPlaybookVersionRow) == 10
         # the block_ip seed is the documented single-step playbook
         row = db.execute(
             select(SoarPlaybookRow).where(SoarPlaybookRow.playbook_id == "block_ip")
@@ -88,7 +88,7 @@ class TestSeedSync:
 
     def test_list_playbooks_persists_seed(self, db, service) -> None:
         page = service.list_playbooks(db, clock=lambda: FIXED)
-        assert page.total == 7
+        assert page.total == 10
         assert page.page == 1
         ids = {item.playbook_id for item in page.items}
         assert ids == {
@@ -99,6 +99,9 @@ class TestSeedSync:
             "terminate_session",
             "isolate_endpoint",
             "endpoint_containment",
+            "ransomware_rapid_response",
+            "credential_theft_mitigation",
+            "c2_infrastructure_takedown",
         }
 
     def test_get_playbook_by_id(self, db, service) -> None:

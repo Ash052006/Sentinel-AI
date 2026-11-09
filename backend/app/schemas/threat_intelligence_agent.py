@@ -312,10 +312,10 @@ class ThreatIntelligenceAnalysis(BaseModel):
         metadata: Execution metadata.
     """
 
-    event_id: uuid.UUID = Field(
+    event_id: uuid.UUID | None = Field(
         ...,
         description=(
-            "Identity of the security event.  Preserved from the "
+            "Identity of the security event (None for manual lookups).  Preserved from the "
             "NormalizedSecurityEvent — never regenerated."
         ),
     )
@@ -360,7 +360,7 @@ class ThreatIntelligenceAnalysis(BaseModel):
     @property
     def has_results(self) -> bool:
         """Return True if at least one provider result is present."""
-        return len(self.results) > 0
+        return any(assoc.result is not None for assoc in self.results)
 
 
 # ---------------------------------------------------------------------------

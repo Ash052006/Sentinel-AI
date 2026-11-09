@@ -586,7 +586,7 @@ describe('DashboardPage — SOC command center', () => {
     expect(screen.getByTestId('window-24h')).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('shows an honest insufficient-data state when the feed has too few distinct buckets', async () => {
+  it('draws a lone cluster instead of hiding a single-bucket series', async () => {
     installMocks({
       detections: [detection({ detected_at: at(5 * DAY) })],
       correlations: [],
@@ -594,10 +594,23 @@ describe('DashboardPage — SOC command center', () => {
     })
     renderDash()
 
+    expect(screen.queryByTestId('insufficient-data')).not.toBeInTheDocument()
+    expect(await screen.findByText(/single 2d bucket/i)).toHaveTextContent(
+      'All observed activity landed in a single 2d bucket in the 30D window',
+    )
+  })
+
+  it('shows an honest insufficient-data state when the window holds no activity', async () => {
+    installMocks({
+      detections: [detection({ detected_at: at(400 * DAY) })],
+      correlations: [],
+      risks: [],
+    })
+    renderDash()
+
     const note = await screen.findByTestId('insufficient-data')
     expect(note).toHaveTextContent('Insufficient historical data')
-    expect(note).toHaveTextContent('not enough to draw a meaningful series')
-    expect(note).toHaveTextContent('too few distinct timestamps to draw any chronological series')
+    expect(note).toHaveTextContent('contains no activity from the bounded feeds')
   })
 
   it('shows empty states when all bounded feeds are empty', async () => {

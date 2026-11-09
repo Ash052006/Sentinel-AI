@@ -244,7 +244,9 @@ class AttackPredictionService:
     # -- internals -----------------------------------------------------------
 
     def _rebuild(self, row: AttackPredictionSessionRecord) -> PredictionResult:
-        return PredictionResult.model_validate(row.session_payload)
+        payload = dict(row.session_payload)
+        payload["created_at"] = row.created_at
+        return PredictionResult.model_validate(payload)
 
 
 def get_attack_prediction_service(db: Session | None = None) -> AttackPredictionService:

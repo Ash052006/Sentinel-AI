@@ -19,8 +19,9 @@ Security properties:
 * Logs contain only provider/model identifiers and retry counts.
 * Exceptions carry sanitized messages; causes are chained internally.
 * Retries are conservative and bounded (``gemini_max_retries``), occur
-  only for transient failures (5xx / transport / timeout), and are never
-  used for client (4xx) errors, rate limits, or malformed output.
+  only for transient failures (5xx / transport / timeout / ordinary 429
+  back-pressure), and are never used for other client (4xx) errors, an
+  exhausted per-day quota, or malformed output.
 """
 
 from __future__ import annotations
@@ -58,6 +59,95 @@ from app.agents.investigation.prompt import InvestigationPrompt
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+#: Google RPC detail types used to distinguish a terminal daily-quota
+#: exhaustion from ordinary, short-lived back-pressure.  Both arrive inside a
+#: 429 body; only the former is pointless to retry within a request.
+_GOOGLE_QUOTA_FAILURE_TYPE = "google.rpc.QuotaFailure"
+_GOOGLE_RETRY_INFO_TYPE = "google.rpc.RetryInfo"
+
+
+def _google_error_details(response: httpx.Response) -> list[dict[str, Any]]:
+    """Return the RPC detail objects from a Google error response, or [].
+
+    The body is inspected only for the structured quota/retry metadata below;
+    it is never copied into an exception or a log.
+    """
+    try:
+        payload = response.json()
+    except Exception:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return []
+    details = error.get("details")
+    if not isinstance(details, list):
+        return []
+    return [item for item in details if isinstance(item, dict)]
+
+
+def _is_daily_quota_exhausted(details: list[dict[str, Any]]) -> bool:
+    """Whether Google reported a per-day quota rather than transient pressure."""
+    for detail in details:
+        if not str(detail.get("@type", "")).endswith(_GOOGLE_QUOTA_FAILURE_TYPE):
+            continue
+        violations = detail.get("violations")
+        if not isinstance(violations, list):
+            continue
+        for violation in violations:
+            if not isinstance(violation, dict):
+                continue
+            text = (
+                f"{violation.get('quotaId', '')} "
+                f"{violation.get('description', '')}"
+            ).lower()
+            if "per day" in text or "perday" in text:
+                return True
+    return False
+
+
+def _parse_google_duration(value: Any) -> float | None:
+    """Parse a Google ``RetryInfo.retryDelay`` duration into seconds.
+
+    Accepts the documented ``[h][m][s]`` form (for example ``22h12m55.8s`` or
+    ``79916s``).  Anything unparsable returns ``None`` so the caller never
+    trusts an unverified delay.
+    """
+    if not isinstance(value, str) or not value.endswith("s"):
+        return None
+    units = {"h": 3600.0, "m": 60.0, "s": 1.0}
+    total = 0.0
+    number = ""
+    for char in value[:-1]:
+        if char.isdigit() or char == ".":
+            number += char
+            continue
+        if char not in units or not number:
+            return None
+        try:
+            total += float(number) * units[char]
+        except ValueError:
+            return None
+        number = ""
+    if number:
+        try:
+            total += float(number)
+        except ValueError:
+            return None
+    if total < 0 or total != total or total in (float("inf"), float("-inf")):
+        return None
+    return total
+
+
+def _google_retry_delay(details: list[dict[str, Any]]) -> float | None:
+    """Return the provider's own retry delay from ``RetryInfo``, if present."""
+    for detail in details:
+        if str(detail.get("@type", "")).endswith(_GOOGLE_RETRY_INFO_TYPE):
+            return _parse_google_duration(detail.get("retryDelay"))
+    return None
+
 
 # Retry backoff constants and the transient-failure marker now live in
 # app.agents.investigation._transport so the Groq provider shares one
@@ -256,14 +346,17 @@ temperature: Generation temperature (default from
     ) -> Any:
         """POST *payload* with bounded retry on transient failures only.
 
-        Retries 5xx server errors, HTTP 429 rate limits, transport-level
-        failures, and timeouts.  Never retries other 4xx client errors or
-        authentication failures, which cannot succeed on repetition.
+        Retries 5xx server errors, ordinary HTTP 429 back-pressure,
+        transport-level failures, and timeouts.  Never retries other 4xx
+        client errors, authentication failures, or an exhausted per-day quota,
+        because repeating those cannot succeed.
 
-        A 429 is retried because it is by definition a *transient* refusal:
-        the provider is asking for back-pressure, not rejecting the request.
+        An ordinary 429 is retried because it is transient back-pressure.
         When the provider supplies a usable ``Retry-After`` the client honours
         it (bounded by :data:`_MAX_RETRY_SLEEP_SECONDS`) instead of guessing.
+        A daily-quota 429 is different: Google reports a ``QuotaFailure`` and
+        often a multi-hour ``RetryInfo`` delay, so it fails immediately with a
+        sanitized explanation rather than spending the whole retry budget.
         """
         last_exc: Exception | None = None
 
@@ -345,10 +438,28 @@ temperature: Generation temperature (default from
                 provider=self.provider_name,
             )
         if status == 429:
-            # Retryable: the provider is applying back-pressure, not
-            # rejecting the request.  A ``Retry-After`` the client already
-            # honoured above is still reported on the terminal failure so the
-            # caller can see how long the provider asked us to wait.
+            details = _google_error_details(response)
+            if _is_daily_quota_exhausted(details):
+                # A per-day quota cannot recover inside the bounded retry
+                # window. Retrying it multiplies latency across every agent and
+                # still ends in the same failure, so report it immediately with
+                # the provider's own retry delay (if supplied).
+                retry_after = _google_retry_delay(details)
+                logger.warning(
+                    "gemini daily request quota exhausted for model=%s",
+                    self._model,
+                )
+                raise InvestigationProviderUnavailableError(
+                    "daily request quota exhausted for the configured Gemini "
+                    "model; choose a model with remaining quota or enable "
+                    "billing",
+                    provider=self.provider_name,
+                    retry_after=retry_after,
+                )
+            # Other 429s are transient back-pressure.  A ``Retry-After`` the
+            # client already honoured above is still reported on the terminal
+            # failure so the caller can see how long the provider asked us to
+            # wait.
             retry_after = _retry_after_seconds(response)
             raise _TransientProviderError(
                 429,

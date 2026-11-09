@@ -1,7 +1,9 @@
 import {
   Activity,
   BookKey,
+  Boxes,
   Braces,
+  ClipboardList,
   Crosshair,
   FileClock,
   FileSearch,
@@ -67,6 +69,8 @@ const NAV_SECTIONS: Array<{ heading: string; items: NavItem[] }> = [
       { to: '/attack-paths', label: 'Attack Paths', icon: Network },
       { to: '/debates', label: 'Agent Debate', icon: MessagesSquare },
       { to: '/predictions', label: 'Predictions', icon: Radar },
+      { to: '/playbooks', label: 'Playbooks', icon: ClipboardList },
+      { to: '/digital-twin', label: 'Digital Twin', icon: Boxes },
     ],
   },
   {

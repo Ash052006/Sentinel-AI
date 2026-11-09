@@ -43,6 +43,7 @@ happened to succeed.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import uuid
@@ -458,7 +459,7 @@ class DebateEngine:
         assessments: list[AgentAssessment] = []
         failures: list[tuple[str, Exception]] = []
 
-        for spec in roster:
+        def _invoke_agent(spec: AgentRoleSpec) -> tuple[AgentRoleSpec, AgentAssessment | None, Exception | None]:
             try:
                 parsed = self._invoke(
                     role=spec.role,
@@ -473,18 +474,24 @@ class DebateEngine:
                 output = self._validate(
                     DebateAssessmentOutput, parsed, f"{spec.role.value} assessment"
                 )
-                assessments.append(
-                    self._build_assessment(spec, output, catalog)
-                )
+                assessment = self._build_assessment(spec, output, catalog)
+                return spec, assessment, None
             except Exception as exc:  # noqa: BLE001 - classified below
                 logger.warning(
                     "debate agent failed in round 1: role=%s error=%s",
                     spec.role.value,
                     type(exc).__name__,
                 )
+                return spec, None, exc
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(roster), 5)) as executor:
+            results = list(executor.map(_invoke_agent, roster))
+
+        for spec, assessment, exc in results:
+            if exc is not None:
                 failures.append((spec.role.value, exc))
-                if not isinstance(exc, Exception):  # pragma: no cover
-                    raise
+            elif assessment is not None:
+                assessments.append(assessment)
 
         if failures:
             raise _partial_failure(1, failures)
@@ -605,7 +612,7 @@ class DebateEngine:
         failures: list[tuple[str, Exception]] = []
         seen: set[str] = set()
 
-        for spec in roster:
+        def _invoke_round_two_agent(spec: AgentRoleSpec) -> tuple[AgentRoleSpec, Any | None, Exception | None]:
             try:
                 parsed = self._invoke(
                     role=spec.role,
@@ -620,6 +627,25 @@ class DebateEngine:
                 output = self._validate(
                     DebateArgumentsOutput, parsed, f"{spec.role.value} arguments"
                 )
+                return spec, output, None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "debate agent failed in round 2: role=%s error=%s",
+                    spec.role.value,
+                    type(exc).__name__,
+                )
+                return spec, None, exc
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(roster), 5)) as executor:
+            results = list(executor.map(_invoke_round_two_agent, roster))
+
+        for spec, output, exc in results:
+            if exc is not None:
+                failures.append((spec.role.value, exc))
+                continue
+            if output is None:
+                continue
+            try:
                 unresolved_questions.update(output.unresolved_questions)
                 for item in output.arguments:
                     if item.target_hypothesis_id not in valid_hypothesis_ids:
@@ -660,7 +686,7 @@ class DebateEngine:
                     arguments.append(argument)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "debate agent failed in round 2: role=%s error=%s",
+                    "debate argument validation failed: role=%s error=%s",
                     spec.role.value,
                     type(exc).__name__,
                 )
@@ -697,7 +723,7 @@ class DebateEngine:
         failures: list[tuple[str, Exception]] = []
         seen: set[str] = set()
 
-        for spec in roster:
+        def _invoke_round_three_agent(spec: AgentRoleSpec) -> tuple[AgentRoleSpec, Any | None, Exception | None]:
             try:
                 parsed = self._invoke(
                     role=spec.role,
@@ -714,6 +740,25 @@ class DebateEngine:
                     parsed,
                     f"{spec.role.value} counterarguments",
                 )
+                return spec, output, None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "debate agent failed in round 3: role=%s error=%s",
+                    spec.role.value,
+                    type(exc).__name__,
+                )
+                return spec, None, exc
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(roster), 5)) as executor:
+            results = list(executor.map(_invoke_round_three_agent, roster))
+
+        for spec, output, exc in results:
+            if exc is not None:
+                failures.append((spec.role.value, exc))
+                continue
+            if output is None:
+                continue
+            try:
                 for item in output.counterarguments:
                     if item.target_argument_id not in valid_argument_ids:
                         raise DebateEvidenceError(
@@ -749,7 +794,7 @@ class DebateEngine:
                     counterarguments.append(counterargument)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "debate agent failed in round 3: role=%s error=%s",
+                    "debate counterargument validation failed: role=%s error=%s",
                     spec.role.value,
                     type(exc).__name__,
                 )

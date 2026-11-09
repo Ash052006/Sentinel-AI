@@ -51,6 +51,7 @@ Design principles
 
 from __future__ import annotations
 
+import collections
 import logging
 import re
 import uuid
@@ -438,6 +439,7 @@ def _to_lookup_record(row: ThreatIntelLookup) -> ThreatIntelLookupRecord:
         lookup_id=row.id,
         indicator_id=row.indicator_id,
         event_id=row.event_id,
+        origin=getattr(row, "origin", "event"),
         provider=row.provider,
         status=row.status.value,
         status_label=lookup_status_label(
@@ -636,23 +638,18 @@ class ThreatIntelQueryService:
 
         events, events_truncated = self._events_for_indicator(resolved, event_cap)
 
-        success_count = sum(1 for item in lookups if item.status == LookupStatus.SUCCESS)
-        error_count = sum(1 for item in lookups if item.status == LookupStatus.ERROR)
-        providers = sorted({item.provider for item in lookups})
-
-        # The rollup counts the whole history, not just the bounded window,
-        # so a truncated detail never misreports an indicator as unenriched.
+        # The rollup calculates current status from the latest outcome per provider
+        # across the whole history, not just the bounded lookup window.
         rollups = self._indicator_rollups([resolved])[resolved]
 
         return ThreatIntelIndicatorDetail(
             indicator=_to_indicator_record(
                 row,
-                providers=rollups["providers"] or providers,
-                lookup_count=rollups["lookup_count"] or len(lookups),
-                success_count=rollups["success_count"] or success_count,
-                error_count=rollups["error_count"] or error_count,
-                latest_lookup_at=rollups["latest_lookup_at"]
-                or (lookups[0].performed_at if lookups else None),
+                providers=rollups["providers"],
+                lookup_count=rollups["lookup_count"],
+                success_count=rollups["success_count"],
+                error_count=rollups["error_count"],
+                latest_lookup_at=rollups["latest_lookup_at"],
             ),
             lookups=[_to_lookup_record(item) for item in lookups],
             lookups_truncated=lookups_truncated,
@@ -704,7 +701,10 @@ class ThreatIntelQueryService:
         """
         statement = select(func.count()).select_from(
             select(ThreatIntelLookup.event_id)
-            .where(ThreatIntelLookup.indicator_id == indicator_id)
+            .where(
+                ThreatIntelLookup.indicator_id == indicator_id,
+                ThreatIntelLookup.event_id.is_not(None),
+            )
             .distinct()
             .subquery()
         )
@@ -721,7 +721,10 @@ class ThreatIntelQueryService:
         recent = func.max(ThreatIntelLookup.performed_at).label("last_performed")
         statement: Select[tuple[uuid.UUID, datetime]] = (
             select(ThreatIntelLookup.event_id, recent)
-            .where(ThreatIntelLookup.indicator_id == indicator_id)
+            .where(
+                ThreatIntelLookup.indicator_id == indicator_id,
+                ThreatIntelLookup.event_id.is_not(None),
+            )
             .group_by(ThreatIntelLookup.event_id)
             .order_by(recent.desc(), ThreatIntelLookup.event_id.asc())
             .limit(cap + 1)
@@ -733,13 +736,15 @@ class ThreatIntelQueryService:
     def _indicator_rollups(
         self, indicator_ids: list[uuid.UUID]
     ) -> dict[uuid.UUID, dict[str, Any]]:
-        """Resolve per-indicator lookup rollups for a page in two queries.
+        """Resolve per-indicator lookup rollups based on the latest outcome per provider.
 
-        Returns a default-zero entry for every requested id, so the caller
-        can index without a presence check.  Each entry owns its own
-        ``providers`` list -- the default is built per id rather than copied
-        from a shared literal, so one indicator's providers can never leak
-        into another's.  An empty ``indicator_ids`` list issues no query.
+        Returns a default-zero entry for every requested id. For each indicator and
+        distinct provider, the latest lookup record (ordered by performed_at descending,
+        with id descending as tie-breaker) determines whether that provider is currently
+        in success or error.
+
+        Older records remain available in lookup history without tainting current status.
+        Manual and event-origin records are included consistently.
         """
         rollups: dict[uuid.UUID, dict[str, Any]] = {
             indicator_id: {
@@ -754,41 +759,51 @@ class ThreatIntelQueryService:
         if not indicator_ids:
             return rollups
 
-        success = func.count(ThreatIntelLookup.id).filter(
-            ThreatIntelLookup.status == LookupStatus.SUCCESS
-        )
-        failure = func.count(ThreatIntelLookup.id).filter(
-            ThreatIntelLookup.status == LookupStatus.ERROR
-        )
-        aggregate = (
+        # 1. Total lookup count and latest lookup timestamp across all attempts
+        summary_stmt = (
             select(
                 ThreatIntelLookup.indicator_id.label("indicator_id"),
                 func.count(ThreatIntelLookup.id).label("lookup_count"),
-                success.label("success_count"),
-                failure.label("error_count"),
                 func.max(ThreatIntelLookup.performed_at).label("latest_lookup_at"),
             )
             .where(ThreatIntelLookup.indicator_id.in_(indicator_ids))
             .group_by(ThreatIntelLookup.indicator_id)
         )
-        for indicator_id, lookup_count, ok, bad, latest in self.db.execute(aggregate):
-            rollups[indicator_id].update(
-                lookup_count=int(lookup_count or 0),
-                success_count=int(ok or 0),
-                error_count=int(bad or 0),
-                latest_lookup_at=_as_utc(latest),
+        for ind_id, total_count, latest_ts in self.db.execute(summary_stmt):
+            rollups[ind_id].update(
+                lookup_count=int(total_count or 0),
+                latest_lookup_at=_as_utc(latest_ts),
             )
 
-        distinct = (
+        # 2. Fetch lookups ordered by performed_at DESC, id DESC to determine
+        # the authoritative latest outcome per provider for each indicator.
+        lookups_stmt = (
             select(
                 ThreatIntelLookup.indicator_id,
                 ThreatIntelLookup.provider,
+                ThreatIntelLookup.status,
             )
             .where(ThreatIntelLookup.indicator_id.in_(indicator_ids))
-            .distinct()
-            .order_by(ThreatIntelLookup.indicator_id, ThreatIntelLookup.provider)
+            .order_by(
+                ThreatIntelLookup.indicator_id,
+                ThreatIntelLookup.provider,
+                ThreatIntelLookup.performed_at.desc(),
+                ThreatIntelLookup.id.desc(),
+            )
         )
-        for indicator_id, provider in self.db.execute(distinct):
-            rollups[indicator_id]["providers"].append(provider)
+
+        seen_providers: dict[uuid.UUID, set[str]] = collections.defaultdict(set)
+        for ind_id, provider, status in self.db.execute(lookups_stmt):
+            if provider in seen_providers[ind_id]:
+                continue
+            seen_providers[ind_id].add(provider)
+            rollups[ind_id]["providers"].append(provider)
+            if status == LookupStatus.SUCCESS:
+                rollups[ind_id]["success_count"] += 1
+            elif status == LookupStatus.ERROR:
+                rollups[ind_id]["error_count"] += 1
+
+        for ind_id in indicator_ids:
+            rollups[ind_id]["providers"].sort()
 
         return rollups
